@@ -7,7 +7,9 @@ for (const file of ['index.html','styles.css','premium.css','app.js','premium.js
 await writeFile(resolve(root,'dist','.nojekyll'),'');
 const html = await readFile(resolve(root,'site/index.html'),'utf8');
 const css = await readFile(resolve(root,'site/styles.css'),'utf8');
+const premiumCss = await readFile(resolve(root,'site/premium.css'),'utf8');
 const js = await readFile(resolve(root,'site/app.js'),'utf8');
+const premiumJs = await readFile(resolve(root,'site/premium.js'),'utf8');
 const portable = html
   .replace('<link rel="stylesheet" href="./styles.css">',()=>`<style>${css}</style>`)
   .replace('<link rel="stylesheet" href="./premium.css">',()=>`<style>${premiumCss}</style>`)
