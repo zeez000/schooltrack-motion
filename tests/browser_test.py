@@ -106,8 +106,10 @@ with sync_playwright() as p:
     page.screenshot(path=str(OUT/'mobile-hero.png'))
     page.locator('#app').screenshot(path=str(OUT/'mobile-dashboard.png'))
     page.locator('[data-event="gate"]').click()
+    expect(page.locator('#detail-dialog')).to_be_visible()
+    page.wait_for_timeout(400)  # Let the drawer transition settle before geometry checks.
     box = page.locator('#detail-dialog').bounding_box()
-    assert box['width'] == 390 and box['y'] > 0
+    assert abs(box['width'] - 390) < 1 and box['y'] > 0, box
     for _ in range(9):
         page.keyboard.press('Tab')
         assert page.evaluate('document.querySelector("dialog").contains(document.activeElement)')
