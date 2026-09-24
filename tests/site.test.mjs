@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+const html = await readFile(new URL('../site/index.html',import.meta.url),'utf8');
+const js = await readFile(new URL('../site/app.js',import.meta.url),'utf8');
+const css = await readFile(new URL('../site/styles.css',import.meta.url),'utf8');
+test('application script parses',() => assert.doesNotThrow(() => new vm.Script(js)));
+test('demo boundary is visible',() => assert.match(html,/All names, check-ins, routes, and notifications are fictional/));
+test('native drawer has a label',() => assert.match(html,/<dialog id="detail-dialog" aria-labelledby="dialog-title">/));
+test('reduced motion is supported',() => assert.match(css,/prefers-reduced-motion:reduce/));
+test('required destinations exist',() => { for (const id of ['top','app','experience','journey','people']) assert.ok(html.includes(`id="${id}"`)); });
+test('no form submission or location request',() => assert.doesNotMatch(js,/navigator\.geolocation|Notification\.requestPermission|fetch\(/));
+test('independent records are used',() => assert.match(js,/recorded:new Set/));
+test('missing-event scenario is retained',() => assert.match(js,/data-scenario="missing"/));
