@@ -1,0 +1,12 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Domain models are intentionally introduced in Phases 3-8, alongside their
+// tenant and authorisation rules. Phase 1 validates database connectivity only.

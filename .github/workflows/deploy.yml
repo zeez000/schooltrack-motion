@@ -18,7 +18,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --prefix backend
       - run: npm test
+      - run: npm run test:backend
+      - run: npm run build:backend
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

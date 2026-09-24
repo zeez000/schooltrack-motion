@@ -8,6 +8,50 @@ Run `npm run dev` with Node.js 22+, then open http://localhost:4173.
 
 Run `npm run build` to generate `dist/`. Open `dist/preview.html` directly for a self-contained preview: no package installation or server is needed for that file.
 
+## Backend / Phase 1
+
+The repository now includes the first backend foundation in `backend/`. It is a TypeScript and Express modular monolith with PostgreSQL connectivity through Prisma, structured request logging, request IDs, security middleware, consistent API errors, graceful shutdown, and testable health endpoints. No student, authentication, transport, checkpoint, or attendance API is claimed yet; those remain later phases.
+
+The architecture and the full inventory of frontend demo data that will eventually move behind APIs are documented in [`docs/backend-architecture-plan.md`](docs/backend-architecture-plan.md).
+
+### Run with Docker
+
+1. Copy the root `.env.example` to `.env` and replace the placeholder PostgreSQL password in both `POSTGRES_PASSWORD` and `DATABASE_URL`.
+2. Start the API and PostgreSQL:
+
+   ```bash
+   docker compose up --build -d
+   ```
+
+3. Check process liveness at `http://localhost:4000/health` and database readiness at `http://localhost:4000/ready`.
+
+4. Stop the services with `docker compose down`. Add `-v` only when you intentionally want to remove the local database volume.
+
+### Run the backend directly
+
+Requires Node.js 22+ and a reachable PostgreSQL database.
+
+```bash
+cd backend
+cp .env.example .env
+npm install
+npm run db:generate
+npm run dev
+```
+
+The Prisma schema is intentionally model-free in Phase 1. Domain migrations and fictional seed accounts begin only when their corresponding tenant and authorisation rules are implemented.
+
+### Backend commands
+
+```bash
+npm run test:backend
+npm run build:backend
+npm --prefix backend run typecheck
+npm --prefix backend run db:migrate
+```
+
+`GET /health` proves the process is alive without making container restarts depend on the database. `GET /ready` executes a PostgreSQL query and returns HTTP 503 until the database is reachable.
+
 ## This version
 
 Warm ivory, forest green, a restrained glass notification card, an illustrated home-to-school route, sliding role controls, independently recorded journey steps, and a desktop drawer that becomes a mobile bottom sheet.

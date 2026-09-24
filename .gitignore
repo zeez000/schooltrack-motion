@@ -5,3 +5,8 @@ __pycache__/
 test-results/
 .env
 .env.*
+!.env.example
+!backend/.env.example
+.npm-cache/
+backend/src/generated/prisma/
+backend/coverage/
