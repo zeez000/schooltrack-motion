@@ -8,5 +8,470 @@ datasource db {
   provider = "postgresql"
 }
 
-// Domain models are intentionally introduced in Phases 3-8, alongside their
-// tenant and authorisation rules. Phase 1 validates database connectivity only.
+enum UserRole {
+  PARENT
+  TEACHER
+  ADMIN
+  TRANSPORT
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum VehicleStatus {
+  ACTIVE
+  MAINTENANCE
+  INACTIVE
+}
+
+enum RouteStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RouteDirection {
+  MORNING
+  RETURN
+  BOTH
+}
+
+enum JourneyDirection {
+  MORNING
+  RETURN
+}
+
+enum JourneyStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXCEPTION
+}
+
+enum CheckpointEventType {
+  HOME_CONFIRMED
+  BUS_BOARDING
+  SCHOOL_GATE_ENTRY
+  CLASSROOM_ENTRY
+  ATTENDANCE_PRESENT
+  ATTENDANCE_ABSENT
+  RETURN_BUS_BOARDING
+  STOP_ARRIVAL
+  GUARDIAN_HANDOVER
+}
+
+enum CheckpointSource {
+  DRIVER
+  TEACHER
+  SCHOOL_GATE
+  RFID
+  NFC
+  QR
+  MANUAL
+  SYSTEM
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum NotificationType {
+  JOURNEY_UPDATE
+  ATTENDANCE
+  TRANSPORT_DELAY
+  EXCEPTION
+  SCHOOL_NOTICE
+}
+
+enum DeviceType {
+  RFID_READER
+  NFC_READER
+  QR_SCANNER
+  GPS_TRACKER
+  TABLET
+  OTHER
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model School {
+  id                   String                   @id @default(uuid()) @db.Uuid
+  name                 String
+  address              String
+  timezone             String                   @default("Asia/Kolkata")
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  users                User[]
+  students             Student[]
+  classes              Classroom[]
+  vehicles             Vehicle[]
+  routes               Route[]
+  devices              Device[]
+  journeys             Journey[]
+  checkpointEvents     CheckpointEvent[]
+  vehicleLocations     VehicleLocation[]
+  attendanceRecords    AttendanceRecord[]
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+
+  @@index([name])
+}
+
+model User {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  schoolId              String                 @db.Uuid
+  email                 String                 @unique
+  phone                 String?
+  passwordHash          String
+  role                  UserRole
+  status                UserStatus             @default(ACTIVE)
+  tokenVersion          Int                    @default(0)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  school                School                 @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  guardianLinks         Guardian[]
+  teacherClasses        TeacherClass[]
+  transportAssignments  TransportAssignment[]
+  refreshSessions       RefreshSession[]
+  recordedCheckpoints   CheckpointEvent[]       @relation("CheckpointRecorder")
+  recordedAttendance    AttendanceRecord[]      @relation("AttendanceRecorder")
+  attendanceCorrections AttendanceCorrection[]  @relation("AttendanceCorrector")
+  notifications         Notification[]
+  auditLogs             AuditLog[]              @relation("AuditActor")
+
+  @@index([schoolId, role, status])
+  @@index([schoolId, email])
+}
+
+model RefreshSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime?
+  ipAddress  String?
+  userAgent  String?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Student {
+  id                String                   @id @default(uuid()) @db.Uuid
+  schoolId          String                   @db.Uuid
+  studentCode       String
+  firstName         String
+  lastName          String
+  classId           String?                  @db.Uuid
+  status            StudentStatus            @default(ACTIVE)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  school            School                   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  classroom         Classroom?               @relation(fields: [classId], references: [id], onDelete: SetNull)
+  guardians         Guardian[]
+  routeAssignments  StudentRouteAssignment[]
+  journeys          Journey[]
+  checkpointEvents  CheckpointEvent[]
+  attendanceRecords AttendanceRecord[]
+  notifications     Notification[]
+
+  @@unique([schoolId, studentCode])
+  @@index([schoolId, classId, status])
+}
+
+model Guardian {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  studentId        String   @db.Uuid
+  relationship     String
+  authorisedPickup Boolean  @default(false)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  student          Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, studentId])
+  @@index([studentId, active])
+}
+
+model Classroom {
+  id             String             @id @default(uuid()) @db.Uuid
+  schoolId       String             @db.Uuid
+  name           String
+  section        String
+  academicYear   String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  school         School             @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  students       Student[]
+  teacherClasses TeacherClass[]
+  attendance     AttendanceRecord[]
+
+  @@unique([schoolId, name, section, academicYear])
+  @@index([schoolId, academicYear])
+}
+
+model TeacherClass {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  classId   String    @db.Uuid
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classroom Classroom @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, classId])
+  @@index([classId, active])
+}
+
+model Vehicle {
+  id                   String                @id @default(uuid()) @db.Uuid
+  schoolId             String                @db.Uuid
+  registrationNumber   String
+  label                String
+  capacity             Int
+  status               VehicleStatus         @default(ACTIVE)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  school               School                @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  routes               Route[]
+  transportAssignments TransportAssignment[]
+  locations            VehicleLocation[]
+
+  @@unique([schoolId, registrationNumber])
+  @@index([schoolId, status])
+}
+
+model Route {
+  id                   String                   @id @default(uuid()) @db.Uuid
+  schoolId             String                   @db.Uuid
+  name                 String
+  vehicleId            String?                  @db.Uuid
+  status               RouteStatus              @default(ACTIVE)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  school               School                   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  vehicle              Vehicle?                 @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  stops                RouteStop[]
+  studentAssignments   StudentRouteAssignment[]
+  transportAssignments TransportAssignment[]
+  journeys             Journey[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId, status])
+}
+
+model RouteStop {
+  id            String                   @id @default(uuid()) @db.Uuid
+  routeId       String                   @db.Uuid
+  name          String
+  latitude      Float
+  longitude     Float
+  sequence      Int
+  scheduledTime String?
+  route         Route                    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  assignments   StudentRouteAssignment[]
+
+  @@unique([routeId, sequence])
+}
+
+model StudentRouteAssignment {
+  id        String         @id @default(uuid()) @db.Uuid
+  studentId String         @db.Uuid
+  routeId   String         @db.Uuid
+  stopId    String?        @db.Uuid
+  direction RouteDirection @default(BOTH)
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  student   Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  route     Route          @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  stop      RouteStop?     @relation(fields: [stopId], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, routeId, direction])
+  @@index([routeId, active])
+  @@index([studentId, active])
+}
+
+model TransportAssignment {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  routeId   String   @db.Uuid
+  vehicleId String?  @db.Uuid
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  route     Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, routeId])
+  @@index([routeId, active])
+}
+
+model Journey {
+  id          String           @id @default(uuid()) @db.Uuid
+  schoolId    String           @db.Uuid
+  studentId   String           @db.Uuid
+  routeId     String?          @db.Uuid
+  date        DateTime         @db.Date
+  direction   JourneyDirection
+  status      JourneyStatus    @default(NOT_STARTED)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  school      School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  student     Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  route       Route?           @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  events      CheckpointEvent[]
+
+  @@unique([studentId, date, direction])
+  @@index([schoolId, date, direction])
+  @@index([routeId, date, status])
+}
+
+model Device {
+  id          String       @id @default(uuid()) @db.Uuid
+  schoolId    String       @db.Uuid
+  deviceKey   String       @unique
+  tokenHash   String
+  deviceType  DeviceType
+  location    String?
+  status      DeviceStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  school      School       @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  checkpoints CheckpointEvent[]
+
+  @@index([schoolId, status])
+}
+
+model CheckpointEvent {
+  id               String              @id @default(uuid()) @db.Uuid
+  schoolId         String              @db.Uuid
+  studentId        String              @db.Uuid
+  journeyId        String?             @db.Uuid
+  eventType        CheckpointEventType
+  timestamp        DateTime
+  recordedByUserId String?             @db.Uuid
+  source           CheckpointSource
+  deviceId         String?             @db.Uuid
+  sourceEventId    String?
+  metadata         Json?
+  createdAt        DateTime            @default(now())
+  school           School              @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  student          Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  journey          Journey?            @relation(fields: [journeyId], references: [id], onDelete: SetNull)
+  recordedBy       User?               @relation("CheckpointRecorder", fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  device           Device?             @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, sourceEventId])
+  @@index([schoolId, studentId, timestamp])
+  @@index([journeyId, timestamp])
+  @@index([eventType, timestamp])
+}
+
+model VehicleLocation {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  vehicleId String   @db.Uuid
+  latitude  Float
+  longitude Float
+  speed     Float?
+  heading   Float?
+  timestamp DateTime
+  createdAt DateTime @default(now())
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, timestamp(sort: Desc)])
+  @@index([schoolId, timestamp])
+}
+
+model AttendanceRecord {
+  id           String             @id @default(uuid()) @db.Uuid
+  schoolId     String             @db.Uuid
+  studentId    String             @db.Uuid
+  classId      String             @db.Uuid
+  date         DateTime           @db.Date
+  status       AttendanceStatus
+  recordedById String             @db.Uuid
+  recordedAt   DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  school       School             @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  student      Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classroom    Classroom          @relation(fields: [classId], references: [id], onDelete: Restrict)
+  recordedBy   User               @relation("AttendanceRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+  corrections  AttendanceCorrection[]
+
+  @@unique([studentId, date])
+  @@index([schoolId, classId, date])
+}
+
+model AttendanceCorrection {
+  id            String           @id @default(uuid()) @db.Uuid
+  attendanceId  String           @db.Uuid
+  fromStatus    AttendanceStatus
+  toStatus      AttendanceStatus
+  reason        String
+  correctedById String           @db.Uuid
+  createdAt     DateTime         @default(now())
+  attendance    AttendanceRecord @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  correctedBy   User             @relation("AttendanceCorrector", fields: [correctedById], references: [id], onDelete: Restrict)
+
+  @@index([attendanceId, createdAt])
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  schoolId  String           @db.Uuid
+  userId    String           @db.Uuid
+  studentId String?          @db.Uuid
+  type      NotificationType
+  title     String
+  body      String
+  metadata  Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  school    School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  student   Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@index([schoolId, studentId, createdAt(sort: Desc)])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  actorUserId String?  @db.Uuid
+  action      String
+  entityType  String
+  entityId    String
+  oldValue    Json?
+  newValue    Json?
+  ipAddress   String?
+  requestId   String?
+  createdAt   DateTime @default(now())
+  school      School   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId, createdAt(sort: Desc)])
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+}

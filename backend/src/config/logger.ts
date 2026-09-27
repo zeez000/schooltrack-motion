@@ -5,17 +5,10 @@ export const logger = pino({
   level: env.LOG_LEVEL,
   redact: {
     paths: [
-      "req.headers.authorization",
-      "req.headers.cookie",
-      "res.headers.set-cookie",
-      "password",
-      "passwordHash",
-      "accessToken",
-      "refreshToken"
+      "req.headers.authorization", "req.headers.cookie", "req.headers.x-device-token",
+      "res.headers.set-cookie", "password", "passwordHash", "accessToken", "refreshToken", "tokenHash"
     ],
     censor: "[REDACTED]"
   },
-  base: {
-    service: "schooltrack-backend"
-  }
+  base: { service: "schooltrack-backend" }
 });

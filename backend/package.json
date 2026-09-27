@@ -1,12 +1,10 @@
 {
   "name": "@schooltrack/backend",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "SchoolTrack modular-monolith API",
-  "engines": {
-    "node": ">=22"
-  },
+  "description": "SchoolTrack multi-tenant modular-monolith API",
+  "engines": { "node": ">=22" },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
@@ -30,10 +28,7 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   },
-  "overrides": {
-    "deepmerge-ts": "^8.0.2",
-    "mysql2": "^3.24.4"
-  },
+  "overrides": { "deepmerge-ts": "^8.0.2", "mysql2": "^3.24.4" },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "prisma generate --config prisma7.config.ts && tsc -p tsconfig.json",
@@ -42,8 +37,10 @@
     "test:watch": "vitest",
     "typecheck": "prisma generate --config prisma7.config.ts && tsc -p tsconfig.json --noEmit",
     "db:generate": "prisma generate --config prisma7.config.ts",
+    "db:push": "prisma db push --config prisma7.config.ts",
     "db:migrate": "prisma migrate dev --config prisma7.config.ts",
     "db:migrate:deploy": "prisma migrate deploy --config prisma7.config.ts",
+    "db:seed": "tsx prisma/seed.ts",
     "postinstall": "prisma generate --config prisma7.config.ts"
   }
 }

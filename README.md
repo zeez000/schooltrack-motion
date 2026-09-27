@@ -1,93 +1,87 @@
-# SchoolTrack / Motion Concept
+# SchoolTrack
 
-A calm, interactive school-day design prototype. The name is provisional. All children, schools, routes, check-ins, and attendance records are fictional.
+SchoolTrack combines the existing premium school-day frontend concept with a complete multi-tenant backend for verified school journey events. The product name and all included demo people/schools are provisional and fictional.
 
-## See it
+## Backend
 
-Run `npm run dev` with Node.js 22+, then open http://localhost:4173.
+The backend lives in `backend/` and uses Node.js 22, TypeScript, Express 5, PostgreSQL 16, Prisma 7, Zod, Pino, REST, and SSE.
 
-Run `npm run build` to generate `dist/`. Open `dist/preview.html` directly for a self-contained preview: no package installation or server is needed for that file.
-
-## Backend / Phase 1
-
-The repository now includes the first backend foundation in `backend/`. It is a TypeScript and Express modular monolith with PostgreSQL connectivity through Prisma, structured request logging, request IDs, security middleware, consistent API errors, graceful shutdown, and testable health endpoints. No student, authentication, transport, checkpoint, or attendance API is claimed yet; those remain later phases.
-
-The architecture and the full inventory of frontend demo data that will eventually move behind APIs are documented in [`docs/backend-architecture-plan.md`](docs/backend-architecture-plan.md).
+Core safety rule: **bus GPS does not prove a child is on the bus, and a later student checkpoint never automatically confirms an earlier missing checkpoint.** The API returns explicit missing/stale states instead.
 
 ### Run with Docker
 
-1. Copy the root `.env.example` to `.env` and replace the placeholder PostgreSQL password in both `POSTGRES_PASSWORD` and `DATABASE_URL`.
-2. Start the API and PostgreSQL:
+```bash
+cp .env.example .env
+# Replace POSTGRES_PASSWORD, DATABASE_URL and JWT_ACCESS_SECRET.
+docker compose up --build -d
+```
 
-   ```bash
-   docker compose up --build -d
-   ```
+The backend container applies committed Prisma migrations before starting. Check:
+- `http://localhost:4000/health`
+- `http://localhost:4000/ready`
+- `http://localhost:4000/docs`
+- `http://localhost:4000/openapi.json`
 
-3. Check process liveness at `http://localhost:4000/health` and database readiness at `http://localhost:4000/ready`.
-
-4. Stop the services with `docker compose down`. Add `-v` only when you intentionally want to remove the local database volume.
-
-### Run the backend directly
-
-Requires Node.js 22+ and a reachable PostgreSQL database.
+### Run directly
 
 ```bash
 cd backend
 cp .env.example .env
-npm install
+npm ci
 npm run db:generate
+npm run db:migrate:deploy
+npm run db:seed
 npm run dev
 ```
 
-The Prisma schema is intentionally model-free in Phase 1. Domain migrations and fictional seed accounts begin only when their corresponding tenant and authorisation rules are implemented.
-
-### Backend commands
-
+Useful commands:
 ```bash
-npm run test:backend
-npm run build:backend
+npm --prefix backend test
 npm --prefix backend run typecheck
-npm --prefix backend run db:migrate
+npm --prefix backend run build
+npm --prefix backend run db:migrate:deploy
+npm --prefix backend run db:seed
 ```
 
-`GET /health` proves the process is alive without making container restarts depend on the database. `GET /ready` executes a PostgreSQL query and returns HTTP 503 until the database is reachable.
+## Fictional development seed
 
-## This version
+`npm run db:seed` creates clearly fictional data for local development:
+- `parent@schooltrack.demo`
+- `teacher@schooltrack.demo`
+- `admin@schooltrack.demo`
+- `driver@schooltrack.demo`
 
-Warm ivory, forest green, a restrained glass notification card, an illustrated home-to-school route, sliding role controls, independently recorded journey steps, and a desktop drawer that becomes a mobile bottom sheet.
+Development-only password: `SchoolTrackDemo!2026`
 
-The parent view has two sample children, Today/Journey/Attendance/Updates screens, a September sample calendar, event details, return-journey simulation, and persistent in-session activity. The teacher view has student search, selection, review and confirmation. The school view has route filtering, assigned-student counts, and a missing-update exception.
+It also creates a normal journey, a **missing boarding record with a later school-entry record**, a current bus location, a deliberately stale bus location, and a demo RFID reader. Never reuse these credentials in a real deployment.
 
-Use **Change scenario** to try regular travel, family drop-off, a missing boarding record, or unavailable updates. A later event never automatically confirms an earlier one. Retry never invents a new check-in. Reset restores the demonstration.
+## Authentication and authorization
 
-## Implementation
+- Passwords use `scrypt` with random salts.
+- Access tokens are short-lived signed tokens.
+- Refresh tokens are high-entropy opaque values, stored only as SHA-256 hashes and rotated on refresh.
+- School tenant scope is enforced in backend queries.
+- Parents require active guardian links, teachers require active class assignments, and transport staff require active route assignments.
+- Development self-registration is off by default and cannot be enabled in production.
 
-Original HTML, CSS and JavaScript, with native Web Animations and CSS transitions. GSAP 3.13.0 is an optional async CDN enhancement for the hosted hero; the whole application remains usable without it. It is not requested by local-file previews or reduced-motion sessions. This version does not install every reference library or reuse their component source.
+## Location and retention
 
-No runtime framework or package download is required. The earlier React/Vite concept was not used as the production preview because its package installation could not be verified in the execution environment. This dependency-free version was built and interaction-tested instead.
+Vehicle samples become stale after `VEHICLE_LOCATION_STALE_SECONDS` (default 300 seconds). New location ingestion deletes samples older than `VEHICLE_LOCATION_RETENTION_DAYS` (default 7 days) for that vehicle. Low-traffic production fleets should also run a scheduled retention job.
 
-Design references: [SmoothUI](https://smoothui.dev/) for restrained glass, segmented navigation, stepper and drawer ideas; [GSAP](https://gsap.com/) for motion direction; and the user-selected micro-interaction galleries. The illustration, layout, styling and application logic are original implementations, not copied gallery components. Sound, Three.js, React Spring, Anime.js, Lenis and DialKit are not installed in this version.
+## API documentation
 
-## Important boundary
+See [`docs/api.md`](docs/api.md) and [`docs/backend-architecture-plan.md`](docs/backend-architecture-plan.md).
 
-This is not a production student-safety service. There is no login, backend, live GPS, real attendance database, verified parent identity, background push messaging, or enforced role access. Role controls are for design review, not security. No location permission is requested and no student data is transmitted. Session data resets on refresh. Hosted pages optionally request GSAP from jsDelivr.
+## Frontend
 
-The calendar is an independently labelled fictional historical dataset, not a reflection of the scenario controls. Route graphics are schematics, not geographic maps or child positions.
+The existing `site/` remains the polished fictional design prototype and is still published with GitHub Pages. Backend completion intentionally does not silently replace its demo data. Connecting the frontend to authenticated API states is a separate integration pass.
 
-## Checks
+## Testing and CI
 
-`npm test` runs 8 structural/script checks. `npm run build` creates the static site and portable HTML.
+GitHub Actions provisions PostgreSQL, installs the locked backend dependencies, applies the Prisma migration, runs backend tests, typechecks and builds the API, then runs the existing frontend tests/build before publishing Pages.
 
-`python tests/browser_test.py` runs the browser interaction suite when Python Playwright and Chromium are installed. The included QA report records 22 passing checks, including independent-event scenarios, teacher confirmation, route filters, focus trapping, Escape/focus restoration, reduced motion, and page overflow at 320, 375, 390, 640, 768, 1024 and 1440 pixels. Local preview bytes were rendered in Chromium because network browser navigation was blocked. Safari, Firefox and the optional hosted GSAP enhancement were not tested.
+Backend integration tests cover invalid/unauthenticated access, guardian scope, cross-school denial, teacher assignment denial, checkpoint non-inference, GPS/presence separation, attendance corrections + audit history, persistent notifications, stale GPS, and transport assignment denial.
 
-## GitHub Pages
+## Production checklist
 
-In repository **Settings > Pages**, choose **GitHub Actions** as the source. The included workflow tests, builds and uploads a Pages artifact on every push to `main`, then deploys when Pages is enabled. Pages administration is a separate permission from pushing source code.
-
-## Files
-
-- `site/`: editable HTML, CSS and JavaScript
-- `scripts/`: dependency-free development server and build
-- `tests/`: structural and browser checks
-- `QA.md`: tested behaviour and remaining boundaries
-- `.github/workflows/deploy.yml`: test, build, publish
+Before using this with real schools or children, add managed secrets, HTTPS, monitoring/alerting, database backups, scheduled retention, push delivery, school/guardian verification workflows, privacy/consent controls, and jurisdiction-specific legal review. This repository does not claim those operational controls are already deployed.

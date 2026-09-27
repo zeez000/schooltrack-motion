@@ -3,13 +3,7 @@ import { env } from "../config/env.js";
 import { PrismaClient } from "../generated/prisma/client.js";
 
 const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
-
 export const prisma = new PrismaClient({ adapter });
 
-export async function checkDatabaseConnection(): Promise<void> {
-  await prisma.$queryRawUnsafe("SELECT 1");
-}
-
-export async function disconnectDatabase(): Promise<void> {
-  await prisma.$disconnect();
-}
+export async function checkDatabaseConnection(): Promise<void> { await prisma.$queryRawUnsafe("SELECT 1"); }
+export async function disconnectDatabase(): Promise<void> { await prisma.$disconnect(); }

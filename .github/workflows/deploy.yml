@@ -1,4 +1,4 @@
-name: Build and publish SchoolTrack
+name: Verify and publish SchoolTrack
 on:
   push:
     branches: [main]
@@ -11,8 +11,27 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
-  build:
+  verify-and-build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: schooltrack_test
+          POSTGRES_USER: schooltrack
+          POSTGRES_PASSWORD: schooltrack_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U schooltrack -d schooltrack_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://schooltrack:schooltrack_test@127.0.0.1:5432/schooltrack_test?schema=public
+      JWT_ACCESS_SECRET: github-actions-schooltrack-test-secret-1234567890
+      NODE_ENV: test
+      LOG_LEVEL: silent
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,16 +39,35 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: backend/package-lock.json
-      - run: npm ci --prefix backend
-      - run: npm test
-      - run: npm run test:backend
-      - run: npm run build:backend
-      - run: npm run build
+      - name: Install backend
+        run: npm ci --prefix backend
+      - name: Generate Prisma migration for verification
+        run: |
+          mkdir -p backend/prisma/migrations/202609270001_full_backend
+          cd backend
+          npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script --output prisma/migrations/202609270001_full_backend/migration.sql --config prisma7.config.ts
+      - name: Preserve generated migration
+        uses: actions/upload-artifact@v4
+        with:
+          name: schooltrack-prisma-migration
+          path: backend/prisma/migrations/202609270001_full_backend/migration.sql
+      - name: Apply migrations
+        run: npm --prefix backend run db:migrate:deploy
+      - name: Backend tests
+        run: npm run test:backend
+      - name: Backend typecheck
+        run: npm --prefix backend run typecheck
+      - name: Backend build
+        run: npm run build:backend
+      - name: Frontend tests
+        run: npm test
+      - name: Frontend build
+        run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
   deploy:
-    needs: build
+    needs: verify-and-build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
