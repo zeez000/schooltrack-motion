@@ -39,7 +39,7 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
   const returnAssignment = assignments.find(a => a.direction === RouteDirection.RETURN || a.direction === RouteDirection.BOTH);
   const applicable = (type: CheckpointEventType) => {
     if (type === CheckpointEventType.BUS_BOARDING) return Boolean(morningAssignment);
-    if ([CheckpointEventType.RETURN_BUS_BOARDING, CheckpointEventType.STOP_ARRIVAL].includes(type)) return Boolean(returnAssignment);
+    if (type === CheckpointEventType.RETURN_BUS_BOARDING || type === CheckpointEventType.STOP_ARRIVAL) return Boolean(returnAssignment);
     return true;
   };
   const morning = projectSequence(morningOrder, recorded, applicable);

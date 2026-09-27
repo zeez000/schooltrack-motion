@@ -1,14 +1,21 @@
 import { createHmac, createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import { env } from "../config/env.js";
 import type { UserRole } from "../generated/prisma/client.js";
 import { ApiError } from "./api-error.js";
 
-const scrypt = promisify(scryptCallback);
 const SCRYPT_N = 32_768;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const KEY_BYTES = 32;
+
+function deriveKey(password: string, salt: Buffer, length: number, options: { N: number; r: number; p: number; maxmem: number }): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scryptCallback(password, salt, length, options, (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    });
+  });
+}
 
 export interface AccessTokenClaims {
   sub: string;
@@ -26,7 +33,7 @@ const encode = (value: unknown): string => Buffer.from(JSON.stringify(value)).to
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const key = await scrypt(password, salt, KEY_BYTES, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: 64 * 1024 * 1024 }) as Buffer;
+  const key = await deriveKey(password, salt, KEY_BYTES, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: 64 * 1024 * 1024 });
   return `scrypt$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt.toString("base64url")}$${key.toString("base64url")}`;
 }
 
@@ -34,9 +41,9 @@ export async function verifyPassword(password: string, encoded: string): Promise
   const [algorithm, n, r, p, saltText, keyText] = encoded.split("$");
   if (algorithm !== "scrypt" || !n || !r || !p || !saltText || !keyText) return false;
   const expected = Buffer.from(keyText, "base64url");
-  const actual = await scrypt(password, Buffer.from(saltText, "base64url"), expected.length, {
+  const actual = await deriveKey(password, Buffer.from(saltText, "base64url"), expected.length, {
     N: Number(n), r: Number(r), p: Number(p), maxmem: 64 * 1024 * 1024
-  }) as Buffer;
+  });
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 

@@ -19,7 +19,7 @@ const teacherClassSchema = z.object({ userId: z.uuid(), classId: z.uuid() });
 const studentRouteSchema = z.object({ studentId: z.uuid(), routeId: z.uuid(), stopId: z.uuid().optional(), direction: z.enum(RouteDirection).default(RouteDirection.BOTH) });
 const transportAssignmentSchema = z.object({ userId: z.uuid(), routeId: z.uuid(), vehicleId: z.uuid().optional() });
 
-function auditContext(request: { auth?: { schoolId: string; userId: string }; id?: unknown; ip?: string }) {
+function auditContext(request: { auth?: { schoolId: string; userId: string } | undefined; id?: unknown; ip?: string | undefined }) {
   return { schoolId: request.auth!.schoolId, actorUserId: request.auth!.userId, requestId: String(request.id ?? ""), ...(request.ip ? { ipAddress: request.ip } : {}) };
 }
 

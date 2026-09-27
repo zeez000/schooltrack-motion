@@ -18,7 +18,7 @@ export async function assertStudentAccess(auth: AuthContext, studentId: string):
     where: { id: studentId, schoolId: auth.schoolId },
     select: { id: true, classId: true }
   });
-  if (!student) notFound("student");
+  if (!student) return notFound("student");
   if (auth.role === "ADMIN") return;
 
   if (auth.role === "PARENT") {

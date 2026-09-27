@@ -5,22 +5,22 @@ import { notifyGuardians } from "./notifications.js";
 import { ApiError } from "../utils/api-error.js";
 
 export interface CheckpointActor {
-  userId?: string;
-  deviceId?: string;
+  userId?: string | undefined;
+  deviceId?: string | undefined;
 }
 
 export interface CreateCheckpointInput {
   schoolId: string;
   studentId: string;
-  journeyId?: string;
+  journeyId?: string | undefined;
   eventType: CheckpointEventType;
   timestamp: Date;
   source: CheckpointSource;
-  sourceEventId?: string;
-  metadata?: Prisma.InputJsonValue;
+  sourceEventId?: string | undefined;
+  metadata?: Prisma.InputJsonValue | undefined;
   actor: CheckpointActor;
-  requestId?: string;
-  ipAddress?: string;
+  requestId?: string | undefined;
+  ipAddress?: string | undefined;
 }
 
 const eventLabel: Record<CheckpointEventType, string> = {

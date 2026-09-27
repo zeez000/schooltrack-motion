@@ -3,14 +3,14 @@ import { prisma } from "./database.js";
 
 export interface AuditInput {
   schoolId: string;
-  actorUserId?: string;
+  actorUserId?: string | undefined;
   action: string;
   entityType: string;
   entityId: string;
-  oldValue?: Prisma.InputJsonValue;
-  newValue?: Prisma.InputJsonValue;
-  ipAddress?: string;
-  requestId?: string;
+  oldValue?: Prisma.InputJsonValue | undefined;
+  newValue?: Prisma.InputJsonValue | undefined;
+  ipAddress?: string | undefined;
+  requestId?: string | undefined;
 }
 
 export async function recordAudit(input: AuditInput, db: Prisma.TransactionClient | typeof prisma = prisma) {
