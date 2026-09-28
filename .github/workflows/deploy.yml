@@ -45,12 +45,16 @@ jobs:
         run: test -s backend/prisma/migrations/202609270001_full_backend/migration.sql
       - name: Apply migrations
         run: npm --prefix backend run db:migrate:deploy
+      - name: Verify fictional demo seed
+        run: npm --prefix backend run db:seed
       - name: Backend tests
         run: npm run test:backend
       - name: Backend typecheck
         run: npm --prefix backend run typecheck
       - name: Backend build
         run: npm run build:backend
+      - name: Backend Docker build
+        run: docker build -t schooltrack-backend-ci ./backend
       - name: Frontend tests
         run: npm test
       - name: Frontend build
