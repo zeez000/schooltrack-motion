@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { authenticate } from "../../middleware/auth.js";
+import { authenticate, requireRoles, roles } from "../../middleware/auth.js";
 import { assertStudentAccess } from "../../services/authorization.js";
 import { prisma } from "../../services/database.js";
 import { buildTodayProjection, nextUtcDay, utcDateOnly } from "../../services/projections.js";
@@ -14,7 +14,7 @@ export function createStudentRouter(): Router {
   const router = Router();
   router.use(authenticate);
 
-  router.get("/:studentId", async (request, response, next) => {
+  router.get("/:studentId", requireRoles(roles.PARENT, roles.TEACHER, roles.ADMIN), async (request, response, next) => {
     try {
       const studentId = idSchema.parse(request.params.studentId);
       await assertStudentAccess(request.auth!, studentId);
@@ -30,7 +30,7 @@ export function createStudentRouter(): Router {
     } catch (error) { next(error); }
   });
 
-  router.get("/:studentId/today", async (request, response, next) => {
+  router.get("/:studentId/today", requireRoles(roles.PARENT, roles.ADMIN), async (request, response, next) => {
     try {
       const studentId = idSchema.parse(request.params.studentId);
       await assertStudentAccess(request.auth!, studentId);
@@ -40,7 +40,7 @@ export function createStudentRouter(): Router {
     } catch (error) { next(error); }
   });
 
-  router.get("/:studentId/journeys", async (request, response, next) => {
+  router.get("/:studentId/journeys", requireRoles(roles.PARENT, roles.ADMIN), async (request, response, next) => {
     try {
       const studentId = idSchema.parse(request.params.studentId);
       await assertStudentAccess(request.auth!, studentId);
@@ -56,7 +56,7 @@ export function createStudentRouter(): Router {
     } catch (error) { next(error); }
   });
 
-  router.get("/:studentId/attendance", async (request, response, next) => {
+  router.get("/:studentId/attendance", requireRoles(roles.PARENT, roles.TEACHER, roles.ADMIN), async (request, response, next) => {
     try {
       const studentId = idSchema.parse(request.params.studentId);
       await assertStudentAccess(request.auth!, studentId);
@@ -76,7 +76,7 @@ export function createStudentRouter(): Router {
     } catch (error) { next(error); }
   });
 
-  router.get("/:studentId/notifications", async (request, response, next) => {
+  router.get("/:studentId/notifications", requireRoles(roles.PARENT), async (request, response, next) => {
     try {
       const studentId = idSchema.parse(request.params.studentId);
       await assertStudentAccess(request.auth!, studentId);
