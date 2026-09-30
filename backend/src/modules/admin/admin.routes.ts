@@ -9,7 +9,7 @@ import { hashPassword } from "../../utils/auth-crypto.js";
 
 const id = z.uuid();
 const page = z.object({ limit: z.coerce.number().int().min(1).max(200).default(100) });
-const userCreate = z.object({ email: z.email(), password: z.string().min(10).max(128), phone: z.string().max(32).optional(), role: z.enum(UserRole), status: z.enum(UserStatus).default(UserStatus.ACTIVE) });
+const userCreate = z.object({ email: z.email(), password: z.string().min(12).max(128), phone: z.string().max(32).optional(), role: z.enum(UserRole), status: z.enum(UserStatus).default(UserStatus.ACTIVE) });
 const studentCreate = z.object({ studentCode: z.string().trim().min(1).max(50), firstName: z.string().trim().min(1).max(100), lastName: z.string().trim().min(1).max(100), classId: z.uuid().optional() });
 const classCreate = z.object({ name: z.string().trim().min(1).max(80), section: z.string().trim().min(1).max(40), academicYear: z.string().trim().min(4).max(30) });
 const vehicleCreate = z.object({ registrationNumber: z.string().trim().min(2).max(40), label: z.string().trim().min(1).max(80), capacity: z.number().int().min(1).max(150), status: z.enum(VehicleStatus).default(VehicleStatus.ACTIVE) });
