@@ -3,7 +3,8 @@ import { z } from "zod";
 import { authenticate, requireRoles, roles } from "../../middleware/auth.js";
 import { assertStudentAccess } from "../../services/authorization.js";
 import { prisma } from "../../services/database.js";
-import { buildTodayProjection, nextUtcDay, utcDateOnly } from "../../services/projections.js";
+import { buildTodayProjection, nextUtcDay } from "../../services/projections.js";
+import { schoolDateOnly } from "../../services/school-time.js";
 import { ApiError } from "../../utils/api-error.js";
 
 const idSchema = z.uuid();
@@ -61,7 +62,7 @@ export function createStudentRouter(): Router {
       const studentId = idSchema.parse(request.params.studentId);
       await assertStudentAccess(request.auth!, studentId);
       const query = dateQuery.parse(request.query);
-      const endDefault = nextUtcDay(utcDateOnly(new Date()));
+      const endDefault = nextUtcDay(await schoolDateOnly(request.auth!.schoolId));
       const from = query.from ? parseDate(query.from) : new Date(endDefault.getTime() - 31 * 86_400_000);
       const to = query.to ? nextUtcDay(parseDate(query.to)) : endDefault;
       const records = await prisma.attendanceRecord.findMany({
