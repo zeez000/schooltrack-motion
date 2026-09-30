@@ -29,7 +29,11 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
   if (!student) return null;
 
   const [events, assignments, journeys] = await Promise.all([
-    prisma.checkpointEvent.findMany({ where: { schoolId, studentId, timestamp: { gte: date, lt: end } }, orderBy: { timestamp: "asc" } }),
+    prisma.checkpointEvent.findMany({
+      where: { schoolId, studentId, timestamp: { gte: date, lt: end } },
+      select: { id: true, eventType: true, timestamp: true, source: true },
+      orderBy: { timestamp: "asc" }
+    }),
     prisma.studentRouteAssignment.findMany({ where: { studentId, active: true }, include: { route: { include: { vehicle: true } }, stop: true } }),
     prisma.journey.findMany({ where: { schoolId, studentId, date }, orderBy: { createdAt: "asc" } })
   ]);
@@ -48,7 +52,12 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
   const assignment = morningAssignment ?? returnAssignment;
   let vehicle: null | Record<string, unknown> = null;
   if (assignment?.route.vehicleId) {
-    const location = await prisma.vehicleLocation.findFirst({ where: { vehicleId: assignment.route.vehicleId, schoolId }, orderBy: { timestamp: "desc" } });
+    const activeJourney = journeys.find((journey) =>
+      journey.routeId === assignment.route.id && (journey.status === "IN_PROGRESS" || journey.status === "EXCEPTION")
+    );
+    const location = activeJourney
+      ? await prisma.vehicleLocation.findFirst({ where: { vehicleId: assignment.route.vehicleId, schoolId }, orderBy: { timestamp: "desc" } })
+      : null;
     const ageSeconds = location ? Math.max(0, Math.floor((now.getTime() - location.timestamp.getTime()) / 1000)) : null;
     vehicle = {
       id: assignment.route.vehicle?.id,
@@ -57,7 +66,7 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
       routeName: assignment.route.name,
       location: location ? { latitude: location.latitude, longitude: location.longitude, speed: location.speed, heading: location.heading, timestamp: location.timestamp } : null,
       lastUpdatedSecondsAgo: ageSeconds,
-      status: !location || ageSeconds === null || ageSeconds > env.VEHICLE_LOCATION_STALE_SECONDS ? "UPDATE_UNAVAILABLE" : "CURRENT"
+      status: !activeJourney ? "NOT_ACTIVE" : !location || ageSeconds === null || ageSeconds > env.VEHICLE_LOCATION_STALE_SECONDS ? "UPDATE_UNAVAILABLE" : "CURRENT"
     };
   }
   const latestEvent = events.at(-1) ?? null;
