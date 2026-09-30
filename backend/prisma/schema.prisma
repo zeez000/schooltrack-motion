@@ -253,6 +253,7 @@ model Vehicle {
   routes               Route[]
   transportAssignments TransportAssignment[]
   locations            VehicleLocation[]
+  devices              Device[]
 
   @@unique([schoolId, registrationNumber])
   @@index([schoolId, status])
@@ -346,19 +347,23 @@ model Journey {
 }
 
 model Device {
-  id          String       @id @default(uuid()) @db.Uuid
-  schoolId    String       @db.Uuid
-  deviceKey   String       @unique
-  tokenHash   String
-  deviceType  DeviceType
-  location    String?
-  status      DeviceStatus @default(ACTIVE)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  school      School       @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  checkpoints CheckpointEvent[]
+  id                String                @id @default(uuid()) @db.Uuid
+  schoolId          String                @db.Uuid
+  deviceKey         String                @unique
+  tokenHash         String
+  deviceType        DeviceType
+  location          String?
+  vehicleId         String?               @db.Uuid
+  allowedEventTypes CheckpointEventType[] @default([])
+  status            DeviceStatus          @default(ACTIVE)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  school            School                @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  vehicle           Vehicle?              @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  checkpoints       CheckpointEvent[]
 
   @@index([schoolId, status])
+  @@index([vehicleId])
 }
 
 model CheckpointEvent {
