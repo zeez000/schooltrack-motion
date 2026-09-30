@@ -2,13 +2,15 @@ name: Verify and publish SchoolTrack
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
   pages: write
   id-token: write
 concurrency:
-  group: pages
+  group: "schooltrack-${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
 jobs:
   verify-and-build:
@@ -32,6 +34,11 @@ jobs:
       JWT_ACCESS_SECRET: github-actions-schooltrack-test-secret-1234567890
       NODE_ENV: test
       LOG_LEVEL: silent
+      POSTGRES_DB: schooltrack_test
+      POSTGRES_USER: schooltrack
+      POSTGRES_PASSWORD: schooltrack_test
+      DOMAIN: api.schooltrack.test
+      CORS_ORIGINS: https://schooltrack.test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,8 +48,12 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install backend
         run: npm ci --prefix backend
-      - name: Verify committed Prisma migration exists
-        run: test -s backend/prisma/migrations/202609270001_full_backend/migration.sql
+      - name: Audit production dependencies
+        run: cd backend && npm audit --omit=dev --audit-level=high
+      - name: Verify committed Prisma migrations exist
+        run: |
+          test -s backend/prisma/migrations/202609270001_full_backend/migration.sql
+          test -s backend/prisma/migrations/202609300001_device_capabilities/migration.sql
       - name: Apply migrations
         run: npm --prefix backend run db:migrate:deploy
       - name: Verify fictional demo seed
@@ -55,6 +66,10 @@ jobs:
         run: npm run build:backend
       - name: Backend Docker build
         run: docker build -t schooltrack-backend-ci ./backend
+      - name: Validate local Compose
+        run: docker compose -f docker-compose.yml config >/dev/null
+      - name: Validate production Compose
+        run: docker compose -f docker-compose.prod.yml config >/dev/null
       - name: Frontend tests
         run: npm test
       - name: Frontend build
@@ -62,12 +77,14 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+
   deploy:
+    if: github.event_name != 'pull_request'
     needs: verify-and-build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: "${{ steps.deployment.outputs.page_url }}"
     steps:
       - uses: actions/configure-pages@v5
       - name: Publish
