@@ -1,4 +1,5 @@
 import { CheckpointEventType, JourneyStatus, NotificationType, type CheckpointSource, type Prisma } from "../generated/prisma/client.js";
+import { env } from "../config/env.js";
 import { prisma } from "./database.js";
 import { recordAudit } from "./audit.js";
 import { notifyGuardians } from "./notifications.js";
@@ -36,6 +37,14 @@ const eventLabel: Record<CheckpointEventType, string> = {
 };
 
 export async function createCheckpoint(input: CreateCheckpointInput) {
+  const now = Date.now();
+  const eventTime = input.timestamp.getTime();
+  if (!Number.isFinite(eventTime) || eventTime > now + env.EVENT_MAX_FUTURE_SKEW_SECONDS * 1000) {
+    throw new ApiError(400, "CHECKPOINT_TIME_INVALID", "Checkpoint timestamp is too far in the future.");
+  }
+  if (eventTime < now - env.CHECKPOINT_MAX_AGE_SECONDS * 1000) {
+    throw new ApiError(400, "CHECKPOINT_TIME_TOO_OLD", "Checkpoint timestamp is outside the accepted recording window.");
+  }
   return prisma.$transaction(async (tx) => {
     const student = await tx.student.findFirst({ where: { id: input.studentId, schoolId: input.schoolId }, select: { id: true, firstName: true } });
     if (!student) throw new ApiError(404, "STUDENT_NOT_FOUND", "Student was not found.");
@@ -45,7 +54,13 @@ export async function createCheckpoint(input: CreateCheckpointInput) {
     }
     if (input.sourceEventId) {
       const existing = await tx.checkpointEvent.findFirst({ where: { schoolId: input.schoolId, sourceEventId: input.sourceEventId } });
-      if (existing) return existing;
+      if (existing) {
+        const sameActor = input.actor.deviceId ? existing.deviceId === input.actor.deviceId
+          : input.actor.userId ? existing.recordedByUserId === input.actor.userId
+            : !existing.deviceId && !existing.recordedByUserId;
+        if (existing.studentId === input.studentId && existing.eventType === input.eventType && existing.source === input.source && sameActor) return existing;
+        throw new ApiError(409, "IDEMPOTENCY_KEY_CONFLICT", "This source event ID is already associated with a different checkpoint.");
+      }
     }
 
     const event = await tx.checkpointEvent.create({
