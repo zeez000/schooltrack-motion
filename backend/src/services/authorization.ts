@@ -1,6 +1,7 @@
 import { JourneyStatus, RouteDirection, type UserRole } from "../generated/prisma/client.js";
 import { prisma } from "./database.js";
 import { ApiError } from "../utils/api-error.js";
+import { schoolDateOnly } from "./school-time.js";
 
 export interface AuthContext {
   userId: string;
@@ -126,8 +127,7 @@ export async function assertVehicleAccess(auth: AuthContext, vehicleId: string):
   }
 
   if (auth.role === "PARENT") {
-    const day = new Date();
-    const date = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
+    const date = await schoolDateOnly(auth.schoolId);
     const linkedStudents = await prisma.guardian.findMany({
       where: { userId: auth.userId, active: true, student: { schoolId: auth.schoolId, status: "ACTIVE" } },
       select: { studentId: true }
