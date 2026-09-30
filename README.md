@@ -51,7 +51,7 @@ npm --prefix backend run db:seed
 - `admin@schooltrack.demo`
 - `driver@schooltrack.demo`
 
-Development-only password: `SchoolTrackDemo!2026`
+The local seed has development-only defaults documented for developers, but it no longer prints passwords/device tokens into CI logs and refuses to run when `NODE_ENV=production`.
 
 It also creates a normal journey, a **missing boarding record with a later school-entry record**, a current bus location, a deliberately stale bus location, and a demo RFID reader. Never reuse these credentials in a real deployment.
 
@@ -59,10 +59,21 @@ It also creates a normal journey, a **missing boarding record with a later schoo
 
 - Passwords use `scrypt` with random salts.
 - Access tokens are short-lived signed tokens.
-- Refresh tokens are high-entropy opaque values, stored only as SHA-256 hashes and rotated on refresh.
+- Refresh tokens are high-entropy opaque values, stored only as SHA-256 hashes and atomically rotated on refresh. Replay revokes the active session family and invalidates outstanding access tokens.
+- Login is throttled by source IP and hashed account identifier.
+- Users can change their own password; the change revokes refresh sessions and invalidates existing access tokens.
 - School tenant scope is enforced in backend queries.
 - Parents require active guardian links, teachers require active class assignments, and transport staff require active route assignments.
 - Development self-registration is off by default and cannot be enabled in production.
+
+## Device and journey integrity
+
+- Scanner/tablet devices are provisioned with an explicit checkpoint-event allowlist.
+- GPS trackers are bound to one vehicle and use `POST /api/device/vehicles/:vehicleId/location`.
+- Device credentials can be rotated from the admin API.
+- Transport actions are checked against MORNING/RETURN route direction.
+- A guardian handover requires an active guardian explicitly authorized for pickup.
+- Parents receive live vehicle location only while one of their linked students has an active journey on that vehicle.
 
 ## Location and retention
 
@@ -82,6 +93,18 @@ GitHub Actions provisions PostgreSQL, installs the locked backend dependencies, 
 
 Backend integration tests cover invalid/unauthenticated access, guardian scope, cross-school denial, teacher assignment denial, checkpoint non-inference, GPS/presence separation, attendance corrections + audit history, persistent notifications, stale GPS, and transport assignment denial.
 
+## Production deployment
+
+A TLS-ready self-host stack is included:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+Set `DOMAIN`, an explicit HTTPS `CORS_ORIGINS`, strong PostgreSQL credentials and a random `JWT_ACCESS_SECRET` of at least 48 characters. The production stack keeps PostgreSQL private, exposes the backend only to Caddy, and publishes only HTTP/HTTPS.
+
+See [SECURITY.md](SECURITY.md) for threat assumptions, incident actions, backup/monitoring requirements and the remaining operational/legal work before real-child data is used.
+
 ## Production checklist
 
-Before using this with real schools or children, add managed secrets, HTTPS, monitoring/alerting, database backups, scheduled retention, push delivery, school/guardian verification workflows, privacy/consent controls, and jurisdiction-specific legal review. This repository does not claim those operational controls are already deployed.
+Before a controlled real-school pilot, add managed secret storage, monitoring/alerting, encrypted database backups with tested restore, scheduled retention, school/guardian identity-verification workflows, privacy/consent controls, push-delivery infrastructure if required, and jurisdiction-specific legal review. The frontend is also still a fictional demo and must be connected to the authenticated API before this becomes an end-user product.
