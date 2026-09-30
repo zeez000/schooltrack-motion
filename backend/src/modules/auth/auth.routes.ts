@@ -144,6 +144,30 @@ export function createAuthRouter(): Router {
     } catch (error) { next(error); }
   });
 
+  router.post("/change-password", authenticate, async (request, response, next) => {
+    try {
+      const input = z.object({
+        currentPassword: z.string().min(1).max(256),
+        newPassword: z.string().min(12).max(128)
+      }).parse(request.body);
+      const user = await prisma.user.findFirst({
+        where: { id: request.auth!.userId, schoolId: request.auth!.schoolId, status: UserStatus.ACTIVE }
+      });
+      if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+        throw new ApiError(401, "CURRENT_PASSWORD_INVALID", "Current password is incorrect.");
+      }
+      if (await verifyPassword(input.newPassword, user.passwordHash)) {
+        throw new ApiError(400, "PASSWORD_UNCHANGED", "New password must be different from the current password.");
+      }
+      const passwordHash = await hashPassword(input.newPassword);
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } }),
+        prisma.refreshSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } })
+      ]);
+      response.status(204).end();
+    } catch (error) { next(error); }
+  });
+
   router.get("/me", authenticate, async (request, response, next) => {
     try {
       const user = await prisma.user.findFirst({
