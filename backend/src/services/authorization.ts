@@ -154,7 +154,7 @@ export async function assertVehicleAccess(auth: AuthContext, vehicleId: string):
 export async function assertStudentTransportAccess(
   auth: AuthContext,
   studentId: string,
-  direction?: RouteDirection.MORNING | RouteDirection.RETURN
+  direction?: "MORNING" | "RETURN"
 ): Promise<void> {
   if (auth.role === "ADMIN") {
     await assertStudentAccess(auth, studentId);
