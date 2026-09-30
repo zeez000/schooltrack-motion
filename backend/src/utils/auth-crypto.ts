@@ -7,6 +7,9 @@ const SCRYPT_N = 32_768;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const KEY_BYTES = 32;
+const MAX_SCRYPT_N = 131_072;
+const MAX_SCRYPT_R = 16;
+const MAX_SCRYPT_P = 4;
 
 function deriveKey(password: string, salt: Buffer, length: number, options: { N: number; r: number; p: number; maxmem: number }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -38,25 +41,19 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
-  const [algorithm, n, r, p, saltText, keyText] = encoded.split("$");
-  if (algorithm !== "scrypt" || !n || !r || !p || !saltText || !keyText) return false;
+  const [algorithm, nText, rText, pText, saltText, keyText] = encoded.split("$");
+  if (algorithm !== "scrypt" || !nText || !rText || !pText || !saltText || !keyText) return false;
+  const N = Number(nText), r = Number(rText), p = Number(pText);
+  if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p) || N < 16_384 || N > MAX_SCRYPT_N || r < 1 || r > MAX_SCRYPT_R || p < 1 || p > MAX_SCRYPT_P) return false;
   const expected = Buffer.from(keyText, "base64url");
-  const actual = await deriveKey(password, Buffer.from(saltText, "base64url"), expected.length, {
-    N: Number(n), r: Number(r), p: Number(p), maxmem: 64 * 1024 * 1024
-  });
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+  if (expected.length !== KEY_BYTES) return false;
+  const actual = await deriveKey(password, Buffer.from(saltText, "base64url"), expected.length, { N, r, p, maxmem: 128 * 1024 * 1024 });
+  return timingSafeEqual(actual, expected);
 }
 
 export function signAccessToken(input: Omit<AccessTokenClaims, "iat" | "exp" | "iss" | "aud" | "jti">): string {
   const now = Math.floor(Date.now() / 1000);
-  const payload: AccessTokenClaims = {
-    ...input,
-    iat: now,
-    exp: now + env.ACCESS_TOKEN_TTL_SECONDS,
-    iss: env.JWT_ISSUER,
-    aud: env.JWT_AUDIENCE,
-    jti: randomBytes(16).toString("base64url")
-  };
+  const payload: AccessTokenClaims = { ...input, iat: now, exp: now + env.ACCESS_TOKEN_TTL_SECONDS, iss: env.JWT_ISSUER, aud: env.JWT_AUDIENCE, jti: randomBytes(16).toString("base64url") };
   const header = encode({ alg: "HS256", typ: "JWT" });
   const body = encode(payload);
   const signature = createHmac("sha256", env.JWT_ACCESS_SECRET).update(`${header}.${body}`).digest("base64url");
@@ -75,7 +72,9 @@ export function verifyAccessToken(token: string): AccessTokenClaims {
     const decodedHeader = JSON.parse(Buffer.from(header, "base64url").toString("utf8")) as { alg?: string; typ?: string };
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as AccessTokenClaims;
     const now = Math.floor(Date.now() / 1000);
-    if (decodedHeader.alg !== "HS256" || decodedHeader.typ !== "JWT" || payload.iss !== env.JWT_ISSUER || payload.aud !== env.JWT_AUDIENCE || payload.exp <= now || payload.iat > now + 60 || !payload.sub || !payload.schoolId || !payload.role) {
+    if (decodedHeader.alg !== "HS256" || decodedHeader.typ !== "JWT" || payload.iss !== env.JWT_ISSUER || payload.aud !== env.JWT_AUDIENCE ||
+        !Number.isInteger(payload.exp) || !Number.isInteger(payload.iat) || !Number.isInteger(payload.tokenVersion) ||
+        payload.exp <= now || payload.iat > now + 60 || !payload.sub || !payload.schoolId || !payload.role || !payload.jti) {
       throw new Error("claim validation failed");
     }
     return payload;
@@ -87,7 +86,6 @@ export function verifyAccessToken(token: string): AccessTokenClaims {
 export function createOpaqueToken(bytes = 48): string {
   return randomBytes(bytes).toString("base64url");
 }
-
 export function sha256Token(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
