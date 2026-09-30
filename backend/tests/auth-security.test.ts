@@ -47,6 +47,26 @@ describe("authentication and authorization security", () => {
     expect(await prisma.refreshSession.count({ where: { userId: fixture.parentA.id, revokedAt: null } })).toBe(0);
   });
 
+  it("changes password, revokes refresh sessions and invalidates the current access token", async () => {
+    const fixture = await createFixture();
+    const session = await loginSession(fixture.parentA.email);
+    const changed = await request(app).post("/api/auth/change-password").set(bearer(session.accessToken)).send({
+      currentPassword: TEST_PASSWORD,
+      newPassword: "SchoolTrackChanged!2026"
+    });
+    expect(changed.status).toBe(204);
+
+    const oldAccess = await request(app).get("/api/auth/me").set(bearer(session.accessToken));
+    expect(oldAccess.status).toBe(401);
+    const oldRefresh = await request(app).post("/api/auth/refresh").send({ refreshToken: session.refreshToken });
+    expect(oldRefresh.status).toBe(401);
+
+    const oldLogin = await request(app).post("/api/auth/login").send({ email: fixture.parentA.email, password: TEST_PASSWORD });
+    expect(oldLogin.status).toBe(401);
+    const newLogin = await request(app).post("/api/auth/login").send({ email: fixture.parentA.email, password: "SchoolTrackChanged!2026" });
+    expect(newLogin.status).toBe(200);
+  });
+
   it("blocks unauthenticated protected access", async () => {
     await createFixture();
     const response = await request(app).get("/api/me/students");
