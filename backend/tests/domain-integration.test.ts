@@ -163,6 +163,61 @@ describe("journey, attendance, device, and vehicle security integration", () => 
     expect(response.body.error.code).toBe("STUDENT_ROUTE_NOT_AUTHORIZED");
   });
 
+  it("requires an explicitly authorized guardian for return handover", async () => {
+    const fixture = await createFixture();
+    const driver = await login(fixture.driverA.email);
+    const guardian = await prisma.guardian.findFirstOrThrow({
+      where: { userId: fixture.parentA.id, studentId: fixture.studentA.id }
+    });
+
+    await prisma.guardian.update({ where: { id: guardian.id }, data: { authorisedPickup: false } });
+    const denied = await request(app).post(`/api/students/${fixture.studentA.id}/handover`).set(bearer(driver)).send({
+      guardianId: guardian.id
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe("GUARDIAN_HANDOVER_NOT_AUTHORIZED");
+
+    await prisma.guardian.update({ where: { id: guardian.id }, data: { authorisedPickup: true } });
+    const accepted = await request(app).post(`/api/students/${fixture.studentA.id}/handover`).set(bearer(driver)).send({
+      guardianId: guardian.id,
+      sourceEventId: "handover-authorized-test"
+    });
+    expect(accepted.status).toBe(201);
+    const event = await prisma.checkpointEvent.findUniqueOrThrow({ where: { id: accepted.body.event.id } });
+    expect(event.eventType).toBe(CheckpointEventType.GUARDIAN_HANDOVER);
+    expect(event.metadata).toMatchObject({ guardianId: guardian.id });
+  });
+
+  it("invalidates the previous device credential immediately after token rotation", async () => {
+    const fixture = await createFixture();
+    const admin = await login(fixture.adminA.email);
+    const created = await request(app).post("/api/admin/devices").set(bearer(admin)).send({
+      deviceKey: "rotating-gate-reader",
+      deviceType: DeviceType.RFID_READER,
+      location: "Main gate",
+      allowedEventTypes: [CheckpointEventType.SCHOOL_GATE_ENTRY]
+    });
+    expect(created.status).toBe(201);
+    const oldToken = created.body.deviceToken as string;
+    const deviceId = created.body.device.id as string;
+
+    const rotated = await request(app).post(`/api/admin/devices/${deviceId}/rotate-token`).set(bearer(admin)).send({});
+    expect(rotated.status).toBe(200);
+    const newToken = rotated.body.deviceToken as string;
+    expect(newToken).not.toBe(oldToken);
+
+    const payload = { studentId: fixture.studentA.id, eventType: CheckpointEventType.SCHOOL_GATE_ENTRY };
+    const oldUse = await request(app).post("/api/device/checkpoints")
+      .set({ "x-device-id": "rotating-gate-reader", "x-device-token": oldToken })
+      .send({ ...payload, sourceEventId: "old-device-token-test" });
+    expect(oldUse.status).toBe(401);
+
+    const newUse = await request(app).post("/api/device/checkpoints")
+      .set({ "x-device-id": "rotating-gate-reader", "x-device-token": newToken })
+      .send({ ...payload, sourceEventId: "new-device-token-test" });
+    expect(newUse.status).toBe(201);
+  });
+
   it("forces trusted actor provenance and rejects idempotency-key collisions across checkpoints", async () => {
     const fixture = await createFixture();
     const admin = await login(fixture.adminA.email);
