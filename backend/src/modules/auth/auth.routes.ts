@@ -17,6 +17,7 @@ const registerSchema = z.object({
   phone: z.string().trim().min(3).max(32).optional()
 });
 type SessionMeta = { ipAddress?: string; userAgent?: string };
+const DUMMY_PASSWORD_HASH = `scrypt$32768$8$1${Buffer.alloc(16).toString("base64url")}${Buffer.alloc(32).toString("base64url")}`;
 
 function requestMeta(request: { ip?: string | undefined; headers: Record<string, unknown> }): SessionMeta {
   const meta: SessionMeta = {};
@@ -74,7 +75,7 @@ export function createAuthRouter(): Router {
     try {
       const input = loginSchema.parse(request.body);
       const user = await prisma.user.findUnique({ where: { email: input.email.trim().toLowerCase() } });
-      const valid = user && user.status === UserStatus.ACTIVE ? await verifyPassword(input.password, user.passwordHash) : false;
+      const valid = await verifyPassword(input.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
       if (!user || user.status !== UserStatus.ACTIVE || !valid) throw new ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.");
       const tokens = await issueSession(user, requestMeta(request));
       response.json({ user: { id: user.id, email: user.email, role: user.role, schoolId: user.schoolId }, ...tokens });
