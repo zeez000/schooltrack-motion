@@ -1,4 +1,4 @@
-import type { UserRole } from "../generated/prisma/client.js";
+import { JourneyStatus, RouteDirection, type UserRole } from "../generated/prisma/client.js";
 import { prisma } from "./database.js";
 import { ApiError } from "../utils/api-error.js";
 
@@ -126,41 +126,36 @@ export async function assertVehicleAccess(auth: AuthContext, vehicleId: string):
   }
 
   if (auth.role === "PARENT") {
-    const guardianLinks = await prisma.guardian.findMany({
-      where: { userId: auth.userId, active: true },
+    const day = new Date();
+    const date = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
+    const linkedStudents = await prisma.guardian.findMany({
+      where: { userId: auth.userId, active: true, student: { schoolId: auth.schoolId, status: "ACTIVE" } },
       select: { studentId: true }
     });
-    const linkedStudentIds = guardianLinks.map((link) => link.studentId);
-
-    if (linkedStudentIds.length) {
-      const tenantStudents = await prisma.student.findMany({
-        where: { id: { in: linkedStudentIds }, schoolId: auth.schoolId, status: "ACTIVE" },
+    const studentIds = linkedStudents.map((link) => link.studentId);
+    if (studentIds.length) {
+      const activeJourney = await prisma.journey.findFirst({
+        where: {
+          schoolId: auth.schoolId,
+          studentId: { in: studentIds },
+          date,
+          status: { in: [JourneyStatus.IN_PROGRESS, JourneyStatus.EXCEPTION] },
+          route: { schoolId: auth.schoolId, vehicleId }
+        },
         select: { id: true }
       });
-      const studentIds = tenantStudents.map((student) => student.id);
-
-      if (studentIds.length) {
-        const routeAssignments = await prisma.studentRouteAssignment.findMany({
-          where: { studentId: { in: studentIds }, active: true },
-          select: { routeId: true }
-        });
-        const routeIds = [...new Set(routeAssignments.map((assignment) => assignment.routeId))];
-
-        if (routeIds.length) {
-          const route = await prisma.route.findFirst({
-            where: { id: { in: routeIds }, schoolId: auth.schoolId, vehicleId },
-            select: { id: true }
-          });
-          if (route) return;
-        }
-      }
+      if (activeJourney) return;
     }
   }
 
   throw new ApiError(403, "VEHICLE_NOT_AUTHORIZED", "You do not have access to this vehicle.");
 }
 
-export async function assertStudentTransportAccess(auth: AuthContext, studentId: string): Promise<void> {
+export async function assertStudentTransportAccess(
+  auth: AuthContext,
+  studentId: string,
+  direction?: RouteDirection.MORNING | RouteDirection.RETURN
+): Promise<void> {
   if (auth.role === "ADMIN") {
     await assertStudentAccess(auth, studentId);
     return;
@@ -176,25 +171,28 @@ export async function assertStudentTransportAccess(auth: AuthContext, studentId:
   if (!student) notFound("student");
 
   const routeAssignments = await prisma.studentRouteAssignment.findMany({
-    where: { studentId, active: true },
+    where: {
+      studentId,
+      active: true,
+      ...(direction ? { direction: { in: [RouteDirection.BOTH, direction] } } : {})
+    },
     select: { routeId: true }
   });
   const routeIds = routeAssignments.map((assignment) => assignment.routeId);
   if (!routeIds.length) {
-    throw new ApiError(403, "STUDENT_ROUTE_NOT_AUTHORIZED", "This student is not assigned to your active route.");
+    throw new ApiError(403, "STUDENT_ROUTE_NOT_AUTHORIZED", "This student is not assigned to your active route for this journey direction.");
   }
 
   const transportAssignment = await prisma.transportAssignment.findFirst({
-    where: { userId: auth.userId, active: true, routeId: { in: routeIds } },
+    where: {
+      userId: auth.userId,
+      active: true,
+      routeId: { in: routeIds },
+      route: { schoolId: auth.schoolId, status: "ACTIVE" }
+    },
     select: { routeId: true }
   });
-  if (transportAssignment) {
-    const route = await prisma.route.findFirst({
-      where: { id: transportAssignment.routeId, schoolId: auth.schoolId },
-      select: { id: true }
-    });
-    if (route) return;
-  }
+  if (transportAssignment) return;
 
-  throw new ApiError(403, "STUDENT_ROUTE_NOT_AUTHORIZED", "This student is not assigned to your active route.");
+  throw new ApiError(403, "STUDENT_ROUTE_NOT_AUTHORIZED", "This student is not assigned to your active route for this journey direction.");
 }
