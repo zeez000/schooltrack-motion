@@ -52,6 +52,27 @@ export async function createCheckpoint(input: CreateCheckpointInput) {
       const journey = await tx.journey.findFirst({ where: { id: input.journeyId, schoolId: input.schoolId, studentId: input.studentId }, select: { id: true } });
       if (!journey) throw new ApiError(400, "INVALID_JOURNEY", "The journey does not belong to this student.");
     }
+    if (input.eventType === CheckpointEventType.GUARDIAN_HANDOVER) {
+      const metadata = input.metadata;
+      const guardianId = metadata && typeof metadata === "object" && !Array.isArray(metadata) && "guardianId" in metadata
+        ? metadata.guardianId
+        : undefined;
+      const guardian = typeof guardianId === "string"
+        ? await tx.guardian.findFirst({
+            where: {
+              id: guardianId,
+              studentId: input.studentId,
+              active: true,
+              authorisedPickup: true,
+              user: { schoolId: input.schoolId, status: "ACTIVE" }
+            },
+            select: { id: true }
+          })
+        : null;
+      if (!guardian) {
+        throw new ApiError(403, "GUARDIAN_HANDOVER_NOT_AUTHORIZED", "The selected guardian is not authorized to receive this student.");
+      }
+    }
     if (input.sourceEventId) {
       const existing = await tx.checkpointEvent.findFirst({ where: { schoolId: input.schoolId, sourceEventId: input.sourceEventId } });
       if (existing) {

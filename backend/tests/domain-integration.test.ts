@@ -188,6 +188,23 @@ describe("journey, attendance, device, and vehicle security integration", () => 
     expect(event.metadata).toMatchObject({ guardianId: guardian.id });
   });
 
+  it("enforces authorized guardian handover through the generic checkpoint endpoint", async () => {
+    const fixture = await createFixture();
+    const driver = await login(fixture.driverA.email);
+
+    const response = await request(app).post("/api/checkpoints").set(bearer(driver)).send({
+      studentId: fixture.studentA.id,
+      eventType: CheckpointEventType.GUARDIAN_HANDOVER,
+      source: CheckpointSource.DRIVER
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("GUARDIAN_HANDOVER_NOT_AUTHORIZED");
+    expect(await prisma.checkpointEvent.count({
+      where: { studentId: fixture.studentA.id, eventType: CheckpointEventType.GUARDIAN_HANDOVER }
+    })).toBe(0);
+  });
+
   it("invalidates the previous device credential immediately after token rotation", async () => {
     const fixture = await createFixture();
     const admin = await login(fixture.adminA.email);

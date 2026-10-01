@@ -83,7 +83,15 @@ describe("authentication and authorization security", () => {
     expect(response.body.student.guardians).toBeUndefined();
   });
 
-  it("blocks transport role from generic student history", async () => {\n    const f = await createFixture();\n    const token = await login(f.driverA.email);\n    const r = await request(app).get(`/api/students/${f.studentA.id}/journeys`).set(bearer(token));\n    expect(r.status).toBe(403);\n    expect(r.body.error.code).toBe("ROLE_FORBIDDEN");\n  });\n\n  it("does not let a parent access a child in another school", async () => {
+  it("blocks transport role from generic student history", async () => {
+    const f = await createFixture();
+    const token = await login(f.driverA.email);
+    const r = await request(app).get(`/api/students/${f.studentA.id}/journeys`).set(bearer(token));
+    expect(r.status).toBe(403);
+    expect(r.body.error.code).toBe("ROLE_FORBIDDEN");
+  });
+
+  it("does not let a parent access a child in another school", async () => {
     const fixture = await createFixture();
     const token = await login(fixture.parentA.email);
     const response = await request(app).get(`/api/students/${fixture.studentB.id}`).set(bearer(token));
