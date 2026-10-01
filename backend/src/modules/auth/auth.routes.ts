@@ -3,11 +3,181 @@ import { z } from "zod";
 import { UserRole, UserStatus } from "../../generated/prisma/client.js";
 import { env } from "../../config/env.js";
 import { authenticate } from "../../middleware/auth.js";
-import { authRateLimit } from "../../middleware/rate-limit.js";
+import { authIpRateLimit, loginAccountRateLimit } from "../../middleware/rate-limit.js";
 import { prisma } from "../../services/database.js";
 import { ApiError } from "../../utils/api-error.js";
 import { createOpaqueToken, hashPassword, sha256Token, signAccessToken, verifyPassword } from "../../utils/auth-crypto.js";
-const loginSchema=z.object({email:z.email(),password:z.string().min(1).max(256)});const tokenSchema=z.object({refreshToken:z.string().min(32).max(1024)});const registerSchema=z.object({schoolId:z.uuid(),email:z.email(),password:z.string().min(10).max(128),phone:z.string().max(32).optional()});type SessionMeta={ipAddress?:string;userAgent?:string};
-function requestMeta(request:{ip?:string|undefined;headers:Record<string,unknown>}):SessionMeta{const meta:SessionMeta={};if(request.ip)meta.ipAddress=request.ip.slice(0,128);const ua=request.headers["user-agent"];if(typeof ua==="string")meta.userAgent=ua.slice(0,512);return meta;}
-async function issueSession(user:{id:string;schoolId:string;role:UserRole;tokenVersion:number},meta:SessionMeta){const refreshToken=createOpaqueToken();const expiresAt=new Date(Date.now()+env.REFRESH_TOKEN_TTL_DAYS*86400000);await prisma.refreshSession.create({data:{userId:user.id,tokenHash:sha256Token(refreshToken),expiresAt,...meta}});return{accessToken:signAccessToken({sub:user.id,schoolId:user.schoolId,role:user.role,tokenVersion:user.tokenVersion}),refreshToken,expiresIn:env.ACCESS_TOKEN_TTL_SECONDS};}
-export function createAuthRouter():Router{const router=Router();router.post("/register",authRateLimit,async(request,response,next)=>{try{if(!env.ENABLE_DEV_REGISTRATION||env.NODE_ENV==="production")throw new ApiError(403,"REGISTRATION_DISABLED","Self-registration is disabled.");const input=registerSchema.parse(request.body);const school=await prisma.school.findUnique({where:{id:input.schoolId},select:{id:true}});if(!school)throw new ApiError(400,"INVALID_SCHOOL","The selected school does not exist.");const email=input.email.trim().toLowerCase();if(await prisma.user.findUnique({where:{email},select:{id:true}}))throw new ApiError(409,"EMAIL_IN_USE","An account already uses this email.");const user=await prisma.user.create({data:{schoolId:input.schoolId,email,...(input.phone?{phone:input.phone}:{}),passwordHash:await hashPassword(input.password),role:UserRole.PARENT,status:UserStatus.ACTIVE}});const tokens=await issueSession(user,requestMeta(request));response.status(201).json({user:{id:user.id,email:user.email,role:user.role,schoolId:user.schoolId},...tokens});}catch(error){next(error);}});router.post("/login",authRateLimit,async(request,response,next)=>{try{const input=loginSchema.parse(request.body);const user=await prisma.user.findUnique({where:{email:input.email.trim().toLowerCase()}});if(!user||user.status!==UserStatus.ACTIVE||!(await verifyPassword(input.password,user.passwordHash)))throw new ApiError(401,"INVALID_CREDENTIALS","Email or password is incorrect.");const tokens=await issueSession(user,requestMeta(request));response.json({user:{id:user.id,email:user.email,role:user.role,schoolId:user.schoolId},...tokens});}catch(error){next(error);}});router.post("/refresh",authRateLimit,async(request,response,next)=>{try{const input=tokenSchema.parse(request.body);const session=await prisma.refreshSession.findUnique({where:{tokenHash:sha256Token(input.refreshToken)},include:{user:true}});if(!session)throw new ApiError(401,"INVALID_REFRESH_TOKEN","The refresh token is invalid.");if(session.revokedAt){await prisma.$transaction([prisma.refreshSession.updateMany({where:{userId:session.userId,revokedAt:null},data:{revokedAt:new Date()}}),prisma.user.update({where:{id:session.userId},data:{tokenVersion:{increment:1}}})]);throw new ApiError(401,"REFRESH_TOKEN_REUSED","This refresh token has already been used.");}if(session.expiresAt<=new Date()||session.user.status!==UserStatus.ACTIVE){await prisma.refreshSession.update({where:{id:session.id},data:{revokedAt:new Date()}}).catch(()=>undefined);throw new ApiError(401,"REFRESH_TOKEN_EXPIRED","The refresh token has expired.");}const replacement=createOpaqueToken();const expiresAt=new Date(Date.now()+env.REFRESH_TOKEN_TTL_DAYS*86400000);await prisma.$transaction([prisma.refreshSession.update({where:{id:session.id},data:{revokedAt:new Date(),lastUsedAt:new Date()}}),prisma.refreshSession.create({data:{userId:session.userId,tokenHash:sha256Token(replacement),expiresAt,...requestMeta(request)}})]);response.json({accessToken:signAccessToken({sub:session.user.id,schoolId:session.user.schoolId,role:session.user.role,tokenVersion:session.user.tokenVersion}),refreshToken:replacement,expiresIn:env.ACCESS_TOKEN_TTL_SECONDS});}catch(error){next(error);}});router.post("/logout",authRateLimit,async(request,response,next)=>{try{const input=tokenSchema.parse(request.body);await prisma.refreshSession.updateMany({where:{tokenHash:sha256Token(input.refreshToken),revokedAt:null},data:{revokedAt:new Date()}});response.status(204).end();}catch(error){next(error);}});router.get("/me",authenticate,async(request,response,next)=>{try{const user=await prisma.user.findFirst({where:{id:request.auth!.userId,schoolId:request.auth!.schoolId},select:{id:true,email:true,phone:true,role:true,status:true,schoolId:true,createdAt:true}});if(!user)throw new ApiError(404,"USER_NOT_FOUND","User was not found.");response.json({user});}catch(error){next(error);}});return router;}
+
+const loginSchema = z.object({ email: z.email().max(254), password: z.string().min(1).max(256) });
+const tokenSchema = z.object({ refreshToken: z.string().min(32).max(1024) });
+const registerSchema = z.object({
+  schoolId: z.uuid(),
+  email: z.email().max(254),
+  password: z.string().min(12).max(128),
+  phone: z.string().trim().min(3).max(32).optional()
+});
+type SessionMeta = { ipAddress?: string; userAgent?: string };
+const DUMMY_PASSWORD_HASH = `scrypt$32768$8$1${Buffer.alloc(16).toString("base64url")}${Buffer.alloc(32).toString("base64url")}`;
+
+function requestMeta(request: { ip?: string | undefined; headers: Record<string, unknown> }): SessionMeta {
+  const meta: SessionMeta = {};
+  if (request.ip) meta.ipAddress = request.ip.slice(0, 128);
+  const ua = request.headers["user-agent"];
+  if (typeof ua === "string") meta.userAgent = ua.slice(0, 512);
+  return meta;
+}
+
+async function issueSession(user: { id: string; schoolId: string; role: UserRole; tokenVersion: number }, meta: SessionMeta) {
+  const refreshToken = createOpaqueToken();
+  const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000);
+  await prisma.refreshSession.create({ data: { userId: user.id, tokenHash: sha256Token(refreshToken), expiresAt, ...meta } });
+  return {
+    accessToken: signAccessToken({ sub: user.id, schoolId: user.schoolId, role: user.role, tokenVersion: user.tokenVersion }),
+    refreshToken,
+    expiresIn: env.ACCESS_TOKEN_TTL_SECONDS
+  };
+}
+
+async function revokeUserSessionsForReplay(userId: string): Promise<void> {
+  await prisma.$transaction([
+    prisma.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+    prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } })
+  ]);
+}
+
+export function createAuthRouter(): Router {
+  const router = Router();
+
+  router.post("/register", authIpRateLimit, async (request, response, next) => {
+    try {
+      if (!env.ENABLE_DEV_REGISTRATION || env.NODE_ENV === "production") throw new ApiError(403, "REGISTRATION_DISABLED", "Self-registration is disabled.");
+      const input = registerSchema.parse(request.body);
+      const school = await prisma.school.findUnique({ where: { id: input.schoolId }, select: { id: true } });
+      if (!school) throw new ApiError(400, "INVALID_SCHOOL", "The selected school does not exist.");
+      const email = input.email.trim().toLowerCase();
+      if (await prisma.user.findUnique({ where: { email }, select: { id: true } })) throw new ApiError(409, "EMAIL_IN_USE", "An account already uses this email.");
+      const user = await prisma.user.create({
+        data: {
+          schoolId: input.schoolId,
+          email,
+          ...(input.phone ? { phone: input.phone } : {}),
+          passwordHash: await hashPassword(input.password),
+          role: UserRole.PARENT,
+          status: UserStatus.ACTIVE
+        }
+      });
+      const tokens = await issueSession(user, requestMeta(request));
+      response.status(201).json({ user: { id: user.id, email: user.email, role: user.role, schoolId: user.schoolId }, ...tokens });
+    } catch (error) { next(error); }
+  });
+
+  router.post("/login", authIpRateLimit, loginAccountRateLimit, async (request, response, next) => {
+    try {
+      const input = loginSchema.parse(request.body);
+      const user = await prisma.user.findUnique({ where: { email: input.email.trim().toLowerCase() } });
+      const valid = await verifyPassword(input.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+      if (!user || user.status !== UserStatus.ACTIVE || !valid) throw new ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.");
+      const tokens = await issueSession(user, requestMeta(request));
+      response.json({ user: { id: user.id, email: user.email, role: user.role, schoolId: user.schoolId }, ...tokens });
+    } catch (error) { next(error); }
+  });
+
+  router.post("/refresh", authIpRateLimit, async (request, response, next) => {
+    try {
+      const input = tokenSchema.parse(request.body);
+      const tokenHash = sha256Token(input.refreshToken);
+      const session = await prisma.refreshSession.findUnique({
+        where: { tokenHash },
+        include: { user: { select: { id: true, schoolId: true, role: true, status: true, tokenVersion: true } } }
+      });
+      if (!session) throw new ApiError(401, "INVALID_REFRESH_TOKEN", "The refresh token is invalid.");
+
+      if (session.revokedAt) {
+        await revokeUserSessionsForReplay(session.userId);
+        throw new ApiError(401, "REFRESH_TOKEN_REUSED", "This refresh token has already been used.");
+      }
+
+      const now = new Date();
+      if (session.expiresAt <= now || session.user.status !== UserStatus.ACTIVE) {
+        await prisma.refreshSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: now } });
+        throw new ApiError(401, "REFRESH_TOKEN_EXPIRED", "The refresh token has expired.");
+      }
+
+      const replacement = createOpaqueToken();
+      const replacementHash = sha256Token(replacement);
+      const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000);
+      const rotated = await prisma.$transaction(async (tx) => {
+        const claimed = await tx.refreshSession.updateMany({
+          where: { id: session.id, revokedAt: null, expiresAt: { gt: now } },
+          data: { revokedAt: now, lastUsedAt: now }
+        });
+        if (claimed.count !== 1) return false;
+        await tx.refreshSession.create({
+          data: { userId: session.userId, tokenHash: replacementHash, expiresAt, ...requestMeta(request) }
+        });
+        return true;
+      });
+
+      if (!rotated) {
+        await revokeUserSessionsForReplay(session.userId);
+        throw new ApiError(401, "REFRESH_TOKEN_REUSED", "This refresh token has already been used.");
+      }
+
+      response.json({
+        accessToken: signAccessToken({
+          sub: session.user.id,
+          schoolId: session.user.schoolId,
+          role: session.user.role,
+          tokenVersion: session.user.tokenVersion
+        }),
+        refreshToken: replacement,
+        expiresIn: env.ACCESS_TOKEN_TTL_SECONDS
+      });
+    } catch (error) { next(error); }
+  });
+
+  router.post("/logout", authIpRateLimit, async (request, response, next) => {
+    try {
+      const input = tokenSchema.parse(request.body);
+      await prisma.refreshSession.updateMany({ where: { tokenHash: sha256Token(input.refreshToken), revokedAt: null }, data: { revokedAt: new Date() } });
+      response.status(204).end();
+    } catch (error) { next(error); }
+  });
+
+  router.post("/change-password", authenticate, async (request, response, next) => {
+    try {
+      const input = z.object({
+        currentPassword: z.string().min(1).max(256),
+        newPassword: z.string().min(12).max(128)
+      }).parse(request.body);
+      const user = await prisma.user.findFirst({
+        where: { id: request.auth!.userId, schoolId: request.auth!.schoolId, status: UserStatus.ACTIVE }
+      });
+      if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+        throw new ApiError(401, "CURRENT_PASSWORD_INVALID", "Current password is incorrect.");
+      }
+      if (await verifyPassword(input.newPassword, user.passwordHash)) {
+        throw new ApiError(400, "PASSWORD_UNCHANGED", "New password must be different from the current password.");
+      }
+      const passwordHash = await hashPassword(input.newPassword);
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } }),
+        prisma.refreshSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } })
+      ]);
+      response.status(204).end();
+    } catch (error) { next(error); }
+  });
+
+  router.get("/me", authenticate, async (request, response, next) => {
+    try {
+      const user = await prisma.user.findFirst({
+        where: { id: request.auth!.userId, schoolId: request.auth!.schoolId },
+        select: { id: true, email: true, phone: true, role: true, status: true, schoolId: true, createdAt: true }
+      });
+      if (!user) throw new ApiError(404, "USER_NOT_FOUND", "User was not found.");
+      response.json({ user });
+    } catch (error) { next(error); }
+  });
+
+  return router;
+}

@@ -3,52 +3,71 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    ports: ["127.0.0.1:5432:5432"]
-    volumes: ["schooltrack-postgres:/var/lib/postgresql/data"]
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - schooltrack-postgres:/var/lib/postgresql/data
+    networks: [internal]
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 12
-      start_period: 5s
 
   backend:
     build: { context: ./backend }
     restart: unless-stopped
     init: true
+    expose: ["4000"]
+    networks: [internal, edge]
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 256
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4173}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set the trusted HTTPS frontend origin}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       JSON_BODY_LIMIT: 100kb
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set a long random JWT secret}
       ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
       REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-30}
-      ENABLE_DEV_REGISTRATION: ${ENABLE_DEV_REGISTRATION:-false}
+      ENABLE_DEV_REGISTRATION: "false"
       VEHICLE_LOCATION_STALE_SECONDS: ${VEHICLE_LOCATION_STALE_SECONDS:-300}
       VEHICLE_LOCATION_RETENTION_DAYS: ${VEHICLE_LOCATION_RETENTION_DAYS:-7}
       CHECKPOINT_MAX_AGE_SECONDS: ${CHECKPOINT_MAX_AGE_SECONDS:-86400}
       EVENT_MAX_FUTURE_SKEW_SECONDS: ${EVENT_MAX_FUTURE_SKEW_SECONDS:-300}
       SSE_MAX_CONNECTION_SECONDS: ${SSE_MAX_CONNECTION_SECONDS:-900}
-      TRUST_PROXY: ${TRUST_PROXY:-false}
-    ports: ["${BACKEND_PORT:-4000}:4000"]
+      TRUST_PROXY: "true"
     depends_on:
       postgres: { condition: service_healthy }
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set the API DNS name, e.g. api.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    depends_on: [backend]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  internal:
+    internal: true
+  edge:
 
 volumes:
   schooltrack-postgres:
+  caddy-data:
+  caddy-config:

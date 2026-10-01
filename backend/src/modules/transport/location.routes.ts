@@ -1,1 +1,201 @@
-import { Router } from "express";import { z } from "zod";import { env } from "../../config/env.js";import { authenticate,requireRoles,roles } from "../../middleware/auth.js";import { assertVehicleAccess } from "../../services/authorization.js";import { recordAudit } from "../../services/audit.js";import { prisma } from "../../services/database.js";import { publishLocation,subscribeLocation,type LocationUpdate } from "../../services/location-events.js";import { ApiError } from "../../utils/api-error.js";const bodySchema=z.object({latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),speed:z.number().min(0).max(300).optional(),heading:z.number().min(0).lt(360).optional(),timestamp:z.iso.datetime().optional()});function toUpdate(location:{vehicleId:string;latitude:number;longitude:number;speed:number|null;heading:number|null;timestamp:Date},now=new Date()):LocationUpdate{return{vehicleId:location.vehicleId,latitude:location.latitude,longitude:location.longitude,speed:location.speed,heading:location.heading,timestamp:location.timestamp.toISOString(),stale:now.getTime()-location.timestamp.getTime()>env.VEHICLE_LOCATION_STALE_SECONDS*1000};}export function createLocationRouter():Router{const router=Router();router.use(authenticate);router.post("/:vehicleId/location",requireRoles(roles.TRANSPORT,roles.ADMIN),async(request,response,next)=>{try{const vehicleId=z.uuid().parse(request.params.vehicleId);await assertVehicleAccess(request.auth!,vehicleId);const input=bodySchema.parse(request.body);const timestamp=input.timestamp?new Date(input.timestamp):new Date();const retention=new Date(Date.now()-env.VEHICLE_LOCATION_RETENTION_DAYS*86400000);const[location]=await prisma.$transaction([prisma.vehicleLocation.create({data:{schoolId:request.auth!.schoolId,vehicleId,latitude:input.latitude,longitude:input.longitude,timestamp,...(input.speed!==undefined?{speed:input.speed}:{}),...(input.heading!==undefined?{heading:input.heading}:{})}}),prisma.vehicleLocation.deleteMany({where:{schoolId:request.auth!.schoolId,vehicleId,timestamp:{lt:retention}}})]);const update=toUpdate(location);publishLocation(update);await recordAudit({schoolId:request.auth!.schoolId,actorUserId:request.auth!.userId,action:"VEHICLE_LOCATION_RECORDED",entityType:"Vehicle",entityId:vehicleId,newValue:{timestamp:update.timestamp},requestId:String(request.id??""),ipAddress:request.ip});response.status(201).json({location:update,retentionDays:env.VEHICLE_LOCATION_RETENTION_DAYS});}catch(error){next(error);}});router.get("/:vehicleId/location",async(request,response,next)=>{try{const vehicleId=z.uuid().parse(request.params.vehicleId);await assertVehicleAccess(request.auth!,vehicleId);const location=await prisma.vehicleLocation.findFirst({where:{schoolId:request.auth!.schoolId,vehicleId},orderBy:{timestamp:"desc"}});if(!location)throw new ApiError(404,"VEHICLE_LOCATION_UNAVAILABLE","No vehicle location has been recorded.");response.json({location:toUpdate(location),staleAfterSeconds:env.VEHICLE_LOCATION_STALE_SECONDS});}catch(error){next(error);}});router.get("/:vehicleId/stream",async(request,response,next)=>{try{const vehicleId=z.uuid().parse(request.params.vehicleId);await assertVehicleAccess(request.auth!,vehicleId);response.status(200);response.setHeader("Content-Type","text/event-stream");response.setHeader("Cache-Control","no-cache, no-transform");response.setHeader("Connection","keep-alive");response.flushHeaders();const send=(update:LocationUpdate)=>response.write(`event: location\ndata: ${JSON.stringify(update)}\n\n`);const latest=await prisma.vehicleLocation.findFirst({where:{schoolId:request.auth!.schoolId,vehicleId},orderBy:{timestamp:"desc"}});if(latest)send(toUpdate(latest));const unsubscribe=subscribeLocation(vehicleId,send);const heartbeat=setInterval(()=>response.write(`event: ping\ndata: {}\n\n`),25000);heartbeat.unref();request.on("close",()=>{clearInterval(heartbeat);unsubscribe();});}catch(error){next(error);}});return router;}
+import { Router } from "express";
+import { z } from "zod";
+import { env } from "../../config/env.js";
+import { DeviceType } from "../../generated/prisma/client.js";
+import { authenticate, requireRoles, roles } from "../../middleware/auth.js";
+import { deviceIpRateLimit, deviceKeyRateLimit } from "../../middleware/rate-limit.js";
+import { recordAudit } from "../../services/audit.js";
+import { assertVehicleAccess } from "../../services/authorization.js";
+import { prisma } from "../../services/database.js";
+import { authenticateDevice } from "../../services/device-auth.js";
+import { publishLocation, subscribeLocation, type LocationUpdate } from "../../services/location-events.js";
+import { ApiError } from "../../utils/api-error.js";
+
+const bodySchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  speed: z.number().min(0).max(300).optional(),
+  heading: z.number().min(0).lt(360).optional(),
+  timestamp: z.iso.datetime().optional()
+});
+
+function toUpdate(location: { vehicleId: string; latitude: number; longitude: number; speed: number | null; heading: number | null; timestamp: Date }, now = new Date()): LocationUpdate {
+  return {
+    vehicleId: location.vehicleId,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    speed: location.speed,
+    heading: location.heading,
+    timestamp: location.timestamp.toISOString(),
+    stale: now.getTime() - location.timestamp.getTime() > env.VEHICLE_LOCATION_STALE_SECONDS * 1000
+  };
+}
+
+function validateTimestamp(input?: string): Date {
+  const timestamp = input ? new Date(input) : new Date();
+  const drift = timestamp.getTime() - Date.now();
+  if (drift > env.EVENT_MAX_FUTURE_SKEW_SECONDS * 1000 || drift < -env.CHECKPOINT_MAX_AGE_SECONDS * 1000) {
+    throw new ApiError(400, "LOCATION_TIME_INVALID", "Vehicle location timestamp is outside the accepted recording window.");
+  }
+  return timestamp;
+}
+
+async function storeLocation(input: {
+  schoolId: string;
+  vehicleId: string;
+  latitude: number;
+  longitude: number;
+  speed?: number;
+  heading?: number;
+  timestamp: Date;
+}) {
+  const retention = new Date(Date.now() - env.VEHICLE_LOCATION_RETENTION_DAYS * 86_400_000);
+  const [location] = await prisma.$transaction([
+    prisma.vehicleLocation.create({
+      data: {
+        schoolId: input.schoolId,
+        vehicleId: input.vehicleId,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        timestamp: input.timestamp,
+        ...(input.speed !== undefined ? { speed: input.speed } : {}),
+        ...(input.heading !== undefined ? { heading: input.heading } : {})
+      }
+    }),
+    prisma.vehicleLocation.deleteMany({
+      where: { schoolId: input.schoolId, vehicleId: input.vehicleId, timestamp: { lt: retention } }
+    })
+  ]);
+  const update = toUpdate(location);
+  publishLocation(update);
+  return update;
+}
+
+export function createLocationRouter(): Router {
+  const router = Router();
+  router.use(authenticate);
+
+  router.post("/:vehicleId/location", requireRoles(roles.TRANSPORT, roles.ADMIN), async (request, response, next) => {
+    try {
+      const vehicleId = z.uuid().parse(request.params.vehicleId);
+      await assertVehicleAccess(request.auth!, vehicleId);
+      const input = bodySchema.parse(request.body);
+      const update = await storeLocation({
+        schoolId: request.auth!.schoolId,
+        vehicleId,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        ...(input.speed !== undefined ? { speed: input.speed } : {}),
+        ...(input.heading !== undefined ? { heading: input.heading } : {}),
+        timestamp: validateTimestamp(input.timestamp)
+      });
+      await recordAudit({
+        schoolId: request.auth!.schoolId,
+        actorUserId: request.auth!.userId,
+        action: "VEHICLE_LOCATION_RECORDED",
+        entityType: "Vehicle",
+        entityId: vehicleId,
+        newValue: { timestamp: update.timestamp },
+        requestId: String(request.id ?? ""),
+        ipAddress: request.ip
+      });
+      response.status(201).json({ location: update, retentionDays: env.VEHICLE_LOCATION_RETENTION_DAYS });
+    } catch (error) { next(error); }
+  });
+
+  router.get("/:vehicleId/location", async (request, response, next) => {
+    try {
+      const vehicleId = z.uuid().parse(request.params.vehicleId);
+      await assertVehicleAccess(request.auth!, vehicleId);
+      const location = await prisma.vehicleLocation.findFirst({
+        where: { schoolId: request.auth!.schoolId, vehicleId },
+        orderBy: { timestamp: "desc" }
+      });
+      if (!location) throw new ApiError(404, "VEHICLE_LOCATION_UNAVAILABLE", "No vehicle location has been recorded.");
+      response.json({ location: toUpdate(location), staleAfterSeconds: env.VEHICLE_LOCATION_STALE_SECONDS });
+    } catch (error) { next(error); }
+  });
+
+  router.get("/:vehicleId/stream", async (request, response, next) => {
+    try {
+      const vehicleId = z.uuid().parse(request.params.vehicleId);
+      await assertVehicleAccess(request.auth!, vehicleId);
+      response.status(200);
+      response.setHeader("Content-Type", "text/event-stream");
+      response.setHeader("Cache-Control", "no-cache, no-transform");
+      response.setHeader("Connection", "keep-alive");
+      response.flushHeaders();
+
+      const send = (update: LocationUpdate) => response.write(`event: location\ndata: ${JSON.stringify(update)}\n\n`);
+      const latest = await prisma.vehicleLocation.findFirst({
+        where: { schoolId: request.auth!.schoolId, vehicleId },
+        orderBy: { timestamp: "desc" }
+      });
+      if (latest) send(toUpdate(latest));
+
+      const unsubscribe = subscribeLocation(vehicleId, send);
+      const heartbeat = setInterval(() => response.write("event: ping\ndata: {}\n\n"), 25_000);
+      heartbeat.unref();
+      const maxLifetime = setTimeout(() => {
+        response.write("event: close\ndata: {}\n\n");
+        response.end();
+      }, env.SSE_MAX_CONNECTION_SECONDS * 1000);
+      maxLifetime.unref();
+
+      request.on("close", () => {
+        clearInterval(heartbeat);
+        clearTimeout(maxLifetime);
+        unsubscribe();
+      });
+    } catch (error) { next(error); }
+  });
+
+  return router;
+}
+
+export function createDeviceLocationRouter(): Router {
+  const router = Router();
+
+  router.post("/device/vehicles/:vehicleId/location", deviceIpRateLimit, deviceKeyRateLimit, async (request, response, next) => {
+    try {
+      const vehicleId = z.uuid().parse(request.params.vehicleId);
+      const device = await authenticateDevice(request);
+      if (device.deviceType !== DeviceType.GPS_TRACKER || !device.vehicleId) {
+        throw new ApiError(403, "DEVICE_LOCATION_FORBIDDEN", "This device is not configured as a vehicle GPS tracker.");
+      }
+      if (device.vehicleId !== vehicleId) {
+        throw new ApiError(403, "DEVICE_VEHICLE_MISMATCH", "This device is not authorized for that vehicle.");
+      }
+      const vehicle = await prisma.vehicle.findFirst({
+        where: { id: vehicleId, schoolId: device.schoolId, status: "ACTIVE" },
+        select: { id: true }
+      });
+      if (!vehicle) throw new ApiError(404, "VEHICLE_NOT_FOUND", "Vehicle was not found.");
+
+      const input = bodySchema.parse(request.body);
+      const update = await storeLocation({
+        schoolId: device.schoolId,
+        vehicleId,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        ...(input.speed !== undefined ? { speed: input.speed } : {}),
+        ...(input.heading !== undefined ? { heading: input.heading } : {}),
+        timestamp: validateTimestamp(input.timestamp)
+      });
+
+      await recordAudit({
+        schoolId: device.schoolId,
+        action: "DEVICE_VEHICLE_LOCATION_RECORDED",
+        entityType: "Vehicle",
+        entityId: vehicleId,
+        newValue: { timestamp: update.timestamp, deviceId: device.id },
+        requestId: String(request.id ?? ""),
+        ipAddress: request.ip
+      });
+
+      response.status(201).json({ location: update, retentionDays: env.VEHICLE_LOCATION_RETENTION_DAYS });
+    } catch (error) { next(error); }
+  });
+
+  return router;
+}

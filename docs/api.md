@@ -35,6 +35,7 @@ Vehicle GPS is stored in `VehicleLocation` and never implies that a student boar
 - `POST /api/auth/login`
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
+- `POST /api/auth/change-password`
 - `GET /api/auth/me`
 - `POST /api/auth/register` (development-only when explicitly enabled)
 
@@ -60,7 +61,7 @@ Attendance corrections require a reason and write both an `AttendanceCorrection`
 - `POST /api/routes/:routeId/start`
 - `POST /api/routes/:routeId/end`
 - `POST /api/students/:studentId/boarding`
-- `POST /api/students/:studentId/handover`
+- `POST /api/students/:studentId/handover` — requires `guardianId` for an active authorized pickup guardian
 - `POST /api/vehicles/:vehicleId/location`
 - `GET /api/vehicles/:vehicleId/location`
 - `GET /api/vehicles/:vehicleId/stream` (SSE)
@@ -70,8 +71,9 @@ Vehicle locations older than `VEHICLE_LOCATION_STALE_SECONDS` are returned as st
 ### Checkpoints / hardware
 - `POST /api/checkpoints` for authorized staff/admins
 - `POST /api/device/checkpoints` using `x-device-id` + `x-device-token`
+- `POST /api/device/vehicles/:vehicleId/location` for a GPS tracker bound to that exact vehicle
 
-GPS tracker devices are explicitly blocked from creating student checkpoint events.
+Registered scanner/tablet devices have an explicit `allowedEventTypes` allowlist. GPS tracker devices are explicitly blocked from creating student checkpoint events.
 
 ### Notifications and audit
 - `GET /api/notifications`
@@ -80,6 +82,8 @@ GPS tracker devices are explicitly blocked from creating student checkpoint even
 
 ### Admin
 Admin routes under `/api/admin` manage users, students, guardians, classes, vehicles, routes, student-route assignments, teacher-class assignments, transport assignments, and devices.
+
+Device administration includes `POST /api/admin/devices/:deviceId/rotate-token`; the previous token becomes invalid immediately.
 
 ## Errors
 Errors use:
@@ -91,3 +95,17 @@ Zod validation errors use `VALIDATION_ERROR` and may include field-level `detail
 ## Interactive reference
 - `GET /openapi.json`
 - `GET /docs`
+
+
+## Production security behavior
+
+- Refresh tokens are rotated atomically. Detected replay revokes the active refresh-session family and invalidates outstanding access tokens through token-version increment.
+- Login is throttled by source IP and hashed account identifier.
+- Parent vehicle-location access requires an active journey for one of the parent's linked students.
+- Transport student actions are checked against the relevant MORNING/RETURN route direction.
+- Staff checkpoint source is derived server-side; clients cannot claim RFID/teacher/driver provenance.
+- Checkpoint and vehicle timestamps outside the configured recording window are rejected.
+- Device credentials can be rotated and device capabilities are provisioned explicitly.
+- Production startup rejects wildcard/non-HTTPS CORS and weak/default JWT secrets.
+
+See `SECURITY.md` for deployment and incident-response requirements.
