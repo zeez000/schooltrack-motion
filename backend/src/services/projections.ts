@@ -67,6 +67,7 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
       routeName: assignment.route.name,
       location: location ? { latitude: location.latitude, longitude: location.longitude, speed: location.speed, heading: location.heading, timestamp: location.timestamp } : null,
       lastUpdatedSecondsAgo: ageSeconds,
+      staleAfterSeconds: env.VEHICLE_LOCATION_STALE_SECONDS,
       status: !activeJourney ? "NOT_ACTIVE" : !location || ageSeconds === null || ageSeconds > env.VEHICLE_LOCATION_STALE_SECONDS ? "UPDATE_UNAVAILABLE" : "CURRENT"
     };
   }
