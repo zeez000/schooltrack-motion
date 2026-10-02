@@ -35,5 +35,14 @@ Vehicle location samples are bounded by `VEHICLE_LOCATION_RETENTION_DAYS` and pu
 - `audit`: admin-visible audit trail
 - `docs`: OpenAPI and human-readable API notes
 
-## Production gaps outside backend scope
-The current marketing/demo frontend still uses fictional browser-local state. Wiring it to these APIs is a separate integration step so the backend can be verified independently first. Production rollout also requires a managed PostgreSQL deployment, HTTPS/reverse proxy, secret manager, monitoring, backups, push-notification provider, school onboarding/consent workflows, and a legal/privacy review for child/location data.
+## Integrated frontend
+
+`site/real.js` resolves the role from `/api/auth/me` and composes the original design components. `site/api/client.js` owns JSON requests, typed API errors, serialized refresh rotation and bearer-authenticated SSE reconnects. Resource modules contain endpoint mappings. Public build configuration lives in `site/config.js`; no production localhost endpoint is injected by default.
+
+The real and fictional demo applications have an explicit mode boundary. Only observed backend success creates real confirmations. Parent vehicle telemetry remains separate from checkpoint status, with server-configured staleness and honest unavailable/reconnecting states. Teacher corrections and guardian handover retain server authorization and audit history. School-local timestamp boundaries are distinct from date-only journey keys, including DST.
+
+Notifications are persisted in PostgreSQL. Future FCM/APNs/SMS/email delivery should consume notification records through a retryable outbox adapter, preserving recipient scope and idempotent delivery; browser receipts must never rewrite checkpoints. No paid delivery provider is connected.
+
+## Deployment boundary
+
+The included Caddy/API/private-PostgreSQL stack and operator-only initial administrator provisioning are deployment-ready. See `docs/deployment.md`. One API replica is the supported topology: SSE subscriptions and rate limits are process-local. Horizontal scaling requires shared pub/sub and gateway limits. Real-school identity/consent policies, secret custody, monitoring and backup/restore scheduling remain deployment-operator responsibilities, not automated child-safety guarantees.

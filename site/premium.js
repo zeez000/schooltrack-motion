@@ -67,7 +67,7 @@
   }
 
   function loadGsap(){
-    if(!/^https?:$/.test(location.protocol)||reduced.matches)return;
+    if(!/^https?:$/.test(location.protocol)||reduced.matches||document.querySelector('script[src="./real.js"]'))return;
     if(window.gsap){
       const st=document.createElement('script');st.src='https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollTrigger.min.js';st.async=true;st.referrerPolicy='no-referrer';st.onload=initGsap;document.head.append(st);return;
     }

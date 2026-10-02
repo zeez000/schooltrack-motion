@@ -197,7 +197,7 @@
   }
   reduced.addEventListener('change',() => { $$('.reveal.pending').forEach(element => element.classList.remove('pending')); });
   // Optional enhancement: a failed CDN never blocks the interface or hides its content.
-  if (/^https?:$/.test(location.protocol) && !reduced.matches) {
+  if (/^https?:$/.test(location.protocol) && !reduced.matches && !document.querySelector('script[src="./real.js"]')) {
     const script = document.createElement('script'); script.src = 'https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js'; script.async = true; script.referrerPolicy = 'no-referrer';
     script.onload = () => { if (window.gsap && !reduced.matches) window.gsap.fromTo('.hero-copy',{y:12},{y:0,duration:.8,ease:'power2.out'}); };
     script.onerror = () => {}; document.head.append(script);

@@ -1,7 +1,7 @@
 import { CheckpointEventType, RouteDirection } from "../generated/prisma/client.js";
 import { env } from "../config/env.js";
 import { prisma } from "./database.js";
-import { schoolDateOnly } from "./school-time.js";
+import { schoolDayBounds } from "./school-time.js";
 
 export type ProjectionState = "RECORDED" | "AWAITING_RECORD" | "NOT_RECORDED" | "NOT_APPLICABLE" | "UPDATE_UNAVAILABLE";
 
@@ -21,8 +21,7 @@ function projectSequence(types: readonly CheckpointEventType[], recorded: Map<Ch
 }
 
 export async function buildTodayProjection(schoolId: string, studentId: string, now = new Date()) {
-  const date = await schoolDateOnly(schoolId, now);
-  const end = nextUtcDay(date);
+  const {date,start,end} = await schoolDayBounds(schoolId, now);
   const student = await prisma.student.findFirst({
     where: { id: studentId, schoolId },
     select: { id: true, firstName: true, lastName: true, studentCode: true, classroom: { select: { id: true, name: true, section: true } } }
@@ -31,7 +30,7 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
 
   const [events, assignments, journeys] = await Promise.all([
     prisma.checkpointEvent.findMany({
-      where: { schoolId, studentId, timestamp: { gte: date, lt: end } },
+      where: { schoolId, studentId, timestamp: { gte: start, lt: end } },
       select: { id: true, eventType: true, timestamp: true, source: true },
       orderBy: { timestamp: "asc" }
     }),
@@ -50,7 +49,7 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
   const morning = projectSequence(morningOrder, recorded, applicable);
   const returning = projectSequence(returnOrder, recorded, applicable);
 
-  const assignment = morningAssignment ?? returnAssignment;
+  const assignment = assignments.find(a => journeys.some(j => j.routeId === a.routeId && (j.status === 'IN_PROGRESS' || j.status === 'EXCEPTION'))) ?? morningAssignment ?? returnAssignment;
   let vehicle: null | Record<string, unknown> = null;
   if (assignment?.route.vehicleId) {
     const activeJourney = journeys.find((journey) =>
@@ -67,6 +66,7 @@ export async function buildTodayProjection(schoolId: string, studentId: string, 
       routeName: assignment.route.name,
       location: location ? { latitude: location.latitude, longitude: location.longitude, speed: location.speed, heading: location.heading, timestamp: location.timestamp } : null,
       lastUpdatedSecondsAgo: ageSeconds,
+      staleAfterSeconds: env.VEHICLE_LOCATION_STALE_SECONDS,
       status: !activeJourney ? "NOT_ACTIVE" : !location || ageSeconds === null || ageSeconds > env.VEHICLE_LOCATION_STALE_SECONDS ? "UPDATE_UNAVAILABLE" : "CURRENT"
     };
   }

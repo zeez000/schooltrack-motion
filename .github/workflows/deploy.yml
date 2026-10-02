@@ -48,14 +48,27 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install backend
         run: npm ci --prefix backend
+      - name: Install frontend browser test dependencies
+        run: npm ci && npx playwright install --with-deps chromium
       - name: Audit production dependencies
-        run: cd backend && npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=high && npm --prefix backend audit --omit=dev --audit-level=high
+      - name: Frontend API and role scripts parse
+        run: |
+          for source in site/config.js site/real.js site/api/*.js; do node --check "$source"; done
       - name: Verify committed Prisma migrations exist
         run: |
           test -s backend/prisma/migrations/202609270001_full_backend/migration.sql
           test -s backend/prisma/migrations/202609300001_device_capabilities/migration.sql
       - name: Apply migrations
         run: npm --prefix backend run db:migrate:deploy
+      - name: Verify primary-to-security migration upgrade
+        env:
+          PGPASSWORD: schooltrack_test
+        run: |
+          createdb -h 127.0.0.1 -U schooltrack schooltrack_upgrade
+          psql -h 127.0.0.1 -U schooltrack -d schooltrack_upgrade -v ON_ERROR_STOP=1 -f backend/prisma/migrations/202609270001_full_backend/migration.sql
+          psql -h 127.0.0.1 -U schooltrack -d schooltrack_upgrade -v ON_ERROR_STOP=1 -f backend/prisma/migrations/202609300001_device_capabilities/migration.sql
+          psql -h 127.0.0.1 -U schooltrack -d schooltrack_upgrade -v ON_ERROR_STOP=1 -c 'SELECT "allowedEventTypes", "vehicleId" FROM "Device" LIMIT 0'
       - name: Verify fictional demo seed
         run: npm --prefix backend run db:seed
       - name: Backend tests
@@ -74,6 +87,20 @@ jobs:
         run: npm test
       - name: Frontend build
         run: npm run build
+        env:
+          SCHOOLTRACK_API_BASE_URL: ${{ vars.SCHOOLTRACK_API_BASE_URL }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Existing browser regression tests
+        run: pip install playwright==1.63.0 && python tests/browser_test.py
+      - name: Browser QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-qa
+          path: test-results/
+          if-no-files-found: ignore
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

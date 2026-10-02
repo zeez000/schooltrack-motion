@@ -6,6 +6,8 @@ SchoolTrack is a multi-tenant school journey API. The backend deliberately keeps
 
 User endpoints use a short-lived HS256 bearer access token and an opaque refresh token. Refresh tokens are hashed in PostgreSQL and rotated on every refresh. Reuse of an already-revoked refresh token revokes the user's remaining active refresh sessions. Passwords use Node.js `scrypt` with per-password random salts.
 
+The connected SPA keeps both credentials only in memory, serializes refresh requests and reauthenticates after reload. This remains a body-token API, not an HttpOnly-cookie design. CORS is explicitly allowlisted and `credentials:false`. Login body is `{email,password}`; refresh/logout body is `{refreshToken}`. Change password uses a bearer header plus `{currentPassword,newPassword}` and returns 204, invalidating all sessions. `/auth/me` returns `{user}` with the authoritative role. Do not log credential responses.
+
 Development self-registration is disabled by default and cannot be enabled in production. School admins create user accounts through the admin API for normal operation.
 
 ## Tenant boundary
@@ -82,6 +84,25 @@ Registered scanner/tablet devices have an explicit `allowedEventTypes` allowlist
 
 ### Admin
 Admin routes under `/api/admin` manage users, students, guardians, classes, vehicles, routes, student-route assignments, teacher-class assignments, transport assignments, and devices.
+
+Each resource supports GET and POST. The assignment/guardian GET endpoints return minimized related display records. Users/devices additionally support `PATCH /:id/status`; devices support `POST /:id/rotate-token`. `POST /api/admin/routes/:routeId/stops` adds a stop with `{name,latitude,longitude,sequence,scheduledTime?}` after tenant checking. Lists are bounded (default 100, maximum 200 where supported); no hard-deletion or bulk-import contract exists.
+
+Create payloads (IDs are UUIDs):
+
+- users: `{email,password,role,phone?,status?}`; password 12–128 characters.
+- classes: `{name,section,academicYear}`.
+- students: `{studentCode,firstName,lastName,classId?}`.
+- guardians: `{userId,studentId,relationship,authorisedPickup}`; defaults to no pickup permission.
+- teacher-class-assignments: `{userId,classId}`.
+- vehicles: `{registrationNumber,label,capacity,status?}`.
+- routes: `{name,vehicleId?,stops?}`; stops use the fields above.
+- student-route-assignments: `{studentId,routeId,stopId?,direction}`; direction MORNING/RETURN/BOTH.
+- transport-assignments: `{userId,routeId,vehicleId?}`.
+- devices: `{deviceKey,deviceType,location?,vehicleId?,allowedEventTypes}`; GPS requires vehicle and an empty checkpoint allowlist.
+
+Teacher attendance POST uses `{date:"YYYY-MM-DD",records:[{studentId,status,correctionReason?}]}`. Existing status changes require a correction reason. Classroom/boarding checkpoints accept `sourceEventId` for idempotency. Route start/end uses `{direction:"MORNING"|"RETURN",timestamp?}`. Handover uses `{guardianId,sourceEventId?}` and independently validates pickup permission server-side.
+
+Vehicle POST uses `{latitude,longitude,speed?,heading?,timestamp?}`; GET returns `{location,staleAfterSeconds}`. Today vehicle data also includes `staleAfterSeconds`; the UI ages samples using that threshold. SSE is fetched with an Authorization header, emitting `location`, `ping`, and `close` events. Reconnect requests reauthorize and refresh expired access credentials. School-local checkpoint timestamp windows are distinct from UTC date-only journey keys.
 
 Device administration includes `POST /api/admin/devices/:deviceId/rotate-token`; the previous token becomes invalid immediately.
 

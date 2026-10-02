@@ -30,6 +30,16 @@ Refresh rotation uses an atomic claim: concurrent requests cannot both rotate th
 
 Changing a password also increments token version and revokes all refresh sessions.
 
+### Browser authentication threat model
+
+The real SPA retains the existing opaque **body-token** contract coherently: access and refresh credentials are held only in the API client's memory. Neither is written to localStorage, sessionStorage, URLs, cookies or logs. Reloading/closing the page requires reauthentication; refresh requests are serialized within the client to avoid concurrent replay. Logout revokes the refresh session and clears local memory even on a connection failure. A failed server logout cannot guarantee remote revocation; refresh sessions still expire server-side.
+
+There is no ambient authentication cookie, so credentialed CORS and cookie-CSRF machinery are not enabled. Cross-origin requests use an explicit bearer header; production origins remain explicitly allowlisted. An HttpOnly-cookie model would require a coordinated backend/client/CSRF change and is not partially implemented here.
+
+Memory-only storage reduces persistence after browser compromise but cannot defend against JavaScript executing in the authenticated page. Treat XSS, malicious extensions and a compromised static host as credential threats. Server strings are HTML-escaped before rendering; the authenticated page does not load the prototype's optional third-party animation script. Existing local motion remains. Review any new third-party scripts before deployment. Configure the public API URL at build time; query overrides are accepted only in unbuilt local source.
+
+Demo state is isolated from the authenticated application, with no demo API mutations or fallback after failure. Device secrets are shown only upon provisioning/rotation and can be dismissed immediately. Guardian identity must still be verified by staff; the checkbox is an operational acknowledgment, not an automated identity proof.
+
 ### Device credentials
 Device tokens are returned only at creation or explicit token rotation. Only their SHA-256 hashes are stored. Devices can be disabled by an admin.
 
@@ -74,6 +84,7 @@ For managed hosting, preserve the same topology: public HTTPS proxy -> API -> pr
 The API applies:
 - JSON body-size limits;
 - global API request limiting;
+- an additional 180-per-minute IP limit on transport route operations, implemented with express-rate-limit;
 - stricter login/account rate limits;
 - device IP and device-key rate limits;
 - HTTP request/header/keep-alive timeouts;
