@@ -486,6 +486,8 @@ describe("real frontend against the backend (no demo fallback)", () => {
     }
   });
   it("preserves premium desktop application with ordinary motion and no third-party code", async () => {
+    await browserExpect(page.locator('.skip')).toHaveAttribute('href','#real-app');
+    await browserExpect(page.locator('.site-header .button')).toContainText('Sign in');
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.reload();
     await signIn(fixture.parentA.email);

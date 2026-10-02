@@ -33,6 +33,17 @@
   bar.innerHTML =
     '<button class="control-button advance" data-mode="real">REAL APPLICATION</button><button class="control-button" data-mode="demo">DEMO PREVIEW — fictional data</button>';
   shell.before(bar);
+  const skipLink = $(".skip");
+  skipLink.href = "#real-app";
+  skipLink.textContent = "Skip to the SchoolTrack application";
+  document.querySelectorAll('a[href="#app"]').forEach(link => {
+    if (link.closest('.hero-actions')) link.addEventListener('click', () => switchMode('demo'));
+    else {
+      link.href = '#real-app';
+      if (link.closest('.site-header')) link.textContent = 'Sign in ↗';
+      link.addEventListener('click', () => switchMode('real'));
+    }
+  });
   let mode = "real",
     user = null,
     tab = "",
@@ -552,26 +563,24 @@
     error = "Your session has expired. Please sign in again.";
     render();
   };
+  function switchMode(nextMode) {
+    mode = nextMode === 'demo' ? 'demo' : 'real';
+    demo.hidden = mode !== 'demo';
+    shell.hidden = mode !== 'real';
+    skipLink.href = mode === 'demo' ? '#app' : '#real-app';
+    skipLink.textContent = mode === 'demo' ? 'Skip to the fictional demo' : 'Skip to the SchoolTrack application';
+    if(mode === 'demo') { stopStream(); $(".demo-footnote").hidden = false; demo.focus(); }
+    else { if(user) load(); shell.focus(); }
+  }
   document.addEventListener("click", (e) => {
     const button = e.target.closest("button");
     if (!button) return;
     if (button.dataset.mode) {
-      mode = button.dataset.mode;
-      demo.hidden = mode !== "demo";
-      shell.hidden = mode !== "real";
-      if (mode === "demo") {
-        stopStream();
-        $(".demo-footnote").hidden = false;
-      } else {
-        if (user) load();
-      }
+      switchMode(button.dataset.mode);
       return;
     }
     if (button.dataset.openRole) {
-      mode = "demo";
-      demo.hidden = false;
-      shell.hidden = true;
-      stopStream();
+      switchMode('demo');
       return;
     }
     if (!shell.contains(button)) return;
