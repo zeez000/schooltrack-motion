@@ -1,3 +1,23 @@
 {
-  "name":"schooltrack-motion","version":"1.0.0","private":true,"type":"module","description":"SchoolTrack interactive frontend and multi-tenant backend","scripts":{"build":"node scripts/build.mjs","build:backend":"npm --prefix backend run build","dev":"node scripts/serve.mjs","dev:backend":"npm --prefix backend run dev","preview":"node scripts/serve.mjs dist","test":"node --test tests/site.test.mjs","test:backend":"npm --prefix backend test","test:all":"npm test && npm run test:backend"},"engines":{"node":">=22"}
+  "name": "schooltrack-motion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SchoolTrack interactive frontend and multi-tenant backend",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:backend": "npm --prefix backend run build",
+    "dev": "node scripts/serve.mjs",
+    "dev:backend": "npm --prefix backend run dev",
+    "preview": "node scripts/serve.mjs dist",
+    "test": "node --test tests/site.test.mjs",
+    "test:backend": "npm --prefix backend test",
+    "test:all": "npm test && npm run test:backend"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
 }

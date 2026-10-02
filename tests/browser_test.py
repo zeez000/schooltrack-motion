@@ -12,7 +12,7 @@ def no_overflow(page, width):
     assert size['scroll'] <= size['viewport'] + 1, f'Overflow at {width}: {size}'
     record(f'No page overflow at {width}px')
 with sync_playwright() as p:
-    browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox'])
+    browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
     context = browser.new_context(viewport={'width':1440,'height':1040},device_scale_factor=1)
     context.route('https://cdn.jsdelivr.net/**', lambda route: route.abort())
     page = context.new_page()
