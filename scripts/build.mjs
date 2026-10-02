@@ -8,7 +8,7 @@ await mkdir(resolve(root,'dist/api'),{recursive:true});
 const apiBase=process.env.SCHOOLTRACK_API_BASE_URL || '';
 if(apiBase){const url=new URL(apiBase);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('Invalid SCHOOLTRACK_API_BASE_URL');if(url.protocol==='http:'&&!['localhost','127.0.0.1'].includes(url.hostname))throw new Error('Public APIs require HTTPS');}
 for (const file of files) {
-  if(file==='config.js')await writeFile(resolve(root,'dist',file),(await readFile(resolve(root,'site',file),'utf8')).replace("'__SCHOOLTRACK_API_BASE_URL__'",JSON.stringify(apiBase)));
+  if(file==='config.js')await writeFile(resolve(root,'dist',file),(await readFile(resolve(root,'site',file),'utf8')).replace(/(["'])__SCHOOLTRACK_API_BASE_URL__\1/,JSON.stringify(apiBase)));
   else await copyFile(resolve(root,'site',file),resolve(root,'dist',file));
 }
 await writeFile(resolve(root,'dist','.nojekyll'),'');

@@ -10,7 +10,7 @@
     "dev": "node scripts/serve.mjs",
     "dev:backend": "npm --prefix backend run dev",
     "preview": "node scripts/serve.mjs dist",
-    "test": "node --test tests/site.test.mjs",
+    "test": "node --test tests/site.test.mjs tests/api.test.mjs",
     "test:backend": "npm --prefix backend test",
     "test:all": "npm test && npm run test:backend"
   },
