@@ -134,7 +134,7 @@
     if(loading)return;loading=true;error='';render();
     try{const result=await fn();message=success;loading=false;await load();return result;}catch(e){loading=false;error=errorText(e);render();}
   }
-  client.onSessionExpired=()=>{user=null;data={};stopStream();generation++;};
+  client.onSessionExpired=()=>{user=null;data={};stopStream();generation++;loading=false;error='Your session has expired. Please sign in again.';render();};
   document.addEventListener('click',e=>{
     const button=e.target.closest('button');if(!button)return;
     if(button.dataset.mode){mode=button.dataset.mode;demo.hidden=mode!=='demo';shell.hidden=mode!=='real';if(mode==='demo'){stopStream();$('.demo-footnote').hidden=false;}else{if(user)load();}return;}
@@ -142,7 +142,7 @@
     if(!shell.contains(button))return;
     if(button.dataset.realTab){tab=button.dataset.realTab;message='';selection='';search='';load();}
     if(button.dataset.real==='reload')load();
-    if(button.dataset.real==='logout'){stopStream();generation++;auth.logout().catch(()=>{});user=null;data={};error='';message='You have signed out.';render();}
+    if(button.dataset.real==='logout'){stopStream();generation++;auth.logout().catch(()=>{if(!user){message='Signed out on this page. The server could not confirm session revocation; contact your school if this device is shared.';render();}});user=null;data={};loading=false;error='';message='You have signed out.';render();}
     if(button.dataset.real==='password'){shell.querySelector('.app-main').innerHTML=header('Change your password.','All existing sessions will be invalidated.')+`<form class="real-form" data-form="password">${field('currentPassword','Current password','password')}${field('newPassword','New password','password')}<button class="control-button advance">Change password</button></form>`;}
     if(button.dataset.read)mutate(()=>notices.markRead(button.dataset.read),'Notification marked read.');
     if(button.dataset.classroom&&confirm('Confirm that this student has arrived in the classroom?'))mutate(()=>attendance.classroom(button.dataset.classroom),'Classroom arrival recorded.');

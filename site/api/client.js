@@ -77,8 +77,8 @@
 
     async logout() {
       const refreshToken = this.refreshToken;
-      try { if (refreshToken) await this.request('/api/auth/logout', {method:'POST', auth:false, retry:false, body:{refreshToken}}); }
-      finally { this.clearSession(); }
+      this.clearSession();
+      if (refreshToken) await this.request('/api/auth/logout', {method:'POST', auth:false, retry:false, body:{refreshToken}});
     }
 
     async stream(path, {onEvent, onState, signal} = {}) {
