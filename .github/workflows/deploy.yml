@@ -51,7 +51,10 @@ jobs:
       - name: Install frontend browser test dependencies
         run: npm ci && npx playwright install --with-deps chromium
       - name: Audit production dependencies
-        run: cd backend && npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=high && npm --prefix backend audit --omit=dev --audit-level=high
+      - name: Frontend API and role scripts parse
+        run: |
+          for source in site/config.js site/real.js site/api/*.js; do node --check "$source"; done
       - name: Verify committed Prisma migrations exist
         run: |
           test -s backend/prisma/migrations/202609270001_full_backend/migration.sql
@@ -91,6 +94,13 @@ jobs:
           python-version: '3.12'
       - name: Existing browser regression tests
         run: pip install playwright==1.63.0 && python tests/browser_test.py
+      - name: Browser QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-qa
+          path: test-results/
+          if-no-files-found: ignore
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

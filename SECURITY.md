@@ -84,6 +84,7 @@ For managed hosting, preserve the same topology: public HTTPS proxy -> API -> pr
 The API applies:
 - JSON body-size limits;
 - global API request limiting;
+- an additional 180-per-minute IP limit on transport route operations, implemented with express-rate-limit;
 - stricter login/account rate limits;
 - device IP and device-key rate limits;
 - HTTP request/header/keep-alive timeouts;
